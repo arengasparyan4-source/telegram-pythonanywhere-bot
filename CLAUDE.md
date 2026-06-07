@@ -82,7 +82,7 @@ telegram-pythonanywhere-bot/
 | `AI_API_KEY` | Yes | — | API key for the AI provider |
 | `SQLITE_PATH` | No | — | Absolute path to a SQLite DB file. When set, enables history / rate limit / preferences / dedupe. When unset, bot runs in **stateless mode**. On PA use `/home/<your-pa-username>/bot.db` |
 | `AI_BASE_URL` | No | `https://api.cerebras.ai/v1` | Any OpenAI-compatible base URL |
-| `AI_MODEL` | No | `llama3.1-8b` | Model name for the provider |
+| `AI_MODEL` | No | `gpt-oss-120b` | Model name for the provider |
 | `HF_SPACE_ID` | No | — | Hugging Face Gradio space ID (e.g. `edisimon/armgpt-demo`) — enables `/model` command when set |
 | `HF_TOKEN` | No | — | HF auth token — only needed if the Gradio space is private or gated |
 | `WEBHOOK_SECRET` | No | _auto-generated_ | Random string Telegram echoes back in `X-Telegram-Bot-Api-Secret-Token`. Auto-bootstrapped on first run: if the env var is unset, `bot/config.py::_bootstrap_webhook_secret()` generates a 64-hex secret, persists it to `.webhook_secret` (gitignored, mode 0600), and reuses it on subsequent boots. The boot-time `register_webhook()` then ships it to Telegram. Set the env var to override / share across envs |
@@ -104,14 +104,14 @@ The bot uses the OpenAI Python SDK pointed at any OpenAI-compatible endpoint. Sw
 
 | Provider | Base URL | Notes |
 |---|---|---|
-| Cerebras | `https://api.cerebras.ai/v1` | Default. Confirmed working on free tier: `llama3.1-8b`, `qwen-3-235b-a22b-instruct-2507`. Also: `gpt-oss-120b` (may be gated) |
+| Cerebras | `https://api.cerebras.ai/v1` | Default. Confirmed working on free tier: `gpt-oss-120b`, `qwen-3-235b-a22b-instruct-2507` |
 | Groq | `https://api.groq.com/openai/v1` | 14,400 req/day free. Model: `llama-3.1-8b-instant` |
 | Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai/` | Model: `gemini-2.5-flash` (250 req/day) |
 
 **Cerebras model IDs** (exact strings — wrong format causes 404):
-- `llama3.1-8b` ✓ (note: dot not dash, no space). Current `.env.example` default — snappy chat, low latency, well-suited to PA free tier where Cerebras 429s on the bigger models are more common
-- `qwen-3-235b-a22b-instruct-2507` ✓ verified working on free tier. Much stronger reasoning and multilingual than the 8B, but slower per-token and more queue-pressured
-- `gpt-oss-120b` ✓ (may require special access on new accounts)
+- `gpt-oss-120b` ✓ verified working on free tier. Current default (`bot/config.py`, `.env.example`) — strong reasoning at Cerebras speed
+- `qwen-3-235b-a22b-instruct-2507` ✓ verified working on free tier. Strong reasoning and multilingual, but slower per-token and more queue-pressured
+- `llama3.1-8b` ✗ deprecated by Cerebras — do not use (was the previous default)
 
 ---
 
@@ -209,7 +209,7 @@ The deployment target is `https://<your-pa-username>.pythonanywhere.com`. The sa
 ## Known gotchas
 
 - **`threaded=False` is required** — see "How the bot works" above
-- **Cerebras model names** — use `llama3.1-8b` not `llama-3.1-8b`. The dot format is required
+- **Cerebras model names** — exact ID strings are required (e.g. `gpt-oss-120b`); a wrong format causes a 404. Check https://inference-docs.cerebras.ai/models for current IDs
 - **Telegram 4096 char limit** — `send_reply()` in `bot/helpers.py` handles splitting automatically
 - **Group chats** — `should_respond()` returns `True` for all messages, so the bot replies to every message in any chat it's in. If you need mention-gated or reply-gated behavior in groups, reintroduce it in `bot/helpers.py::should_respond`. The handler still strips `@<bot_username>` from text before sending to the AI
 - **Webhook secret must match** — if `WEBHOOK_SECRET` is set, the same value must be passed as `secret_token` in `setWebhook`. Mismatch causes all updates to return 403 and the bot goes silent

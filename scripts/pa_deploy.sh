@@ -228,7 +228,7 @@ emit_if_set() { [ -n "${!1:-}" ] && emit "$1" "${!1}"; }
 emit TELEGRAM_BOT_TOKEN "$TELEGRAM_BOT_TOKEN"
 emit AI_API_KEY         "$AI_API_KEY"
 emit AI_BASE_URL        "${AI_BASE_URL:-https://api.cerebras.ai/v1}"
-emit AI_MODEL           "${AI_MODEL:-llama3.1-8b}"
+emit AI_MODEL           "${AI_MODEL:-gpt-oss-120b}"
 emit SQLITE_PATH        "${SQLITE_PATH:-/home/$PA_USERNAME/bot.db}"
 emit WEBHOOK_URL        "${WEBHOOK_URL:-$WEBHOOK_URL_RESOLVED}"
 emit HOSTING_LABEL      "${HOSTING_LABEL:-PythonAnywhere}"

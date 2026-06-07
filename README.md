@@ -1,6 +1,6 @@
 # Telegram Bot — PythonAnywhere Starter Template
 
-A minimal Python Telegram bot running on PythonAnywhere (free tier) with persistent conversation memory in SQLite and AI powered by Cerebras (defaults to `llama3.1-8b` — fast and snappy for chat; `qwen-3-235b-a22b-instruct-2507` is available for stronger reasoning).
+A minimal Python Telegram bot running on PythonAnywhere (free tier) with persistent conversation memory in SQLite and AI powered by Cerebras (defaults to `gpt-oss-120b` — strong reasoning at Cerebras speed; `qwen-3-235b-a22b-instruct-2507` is also available).
 
 **Stack:** Python · Flask · pyTelegramBotAPI · OpenAI SDK · SQLite · PythonAnywhere
 
@@ -15,7 +15,7 @@ A minimal Python Telegram bot running on PythonAnywhere (free tier) with persist
 | Service | Purpose | Needed for | Free tier |
 |---|---|---|---|
 | [Telegram](https://telegram.org) | The bot platform | Everything | Always free |
-| [Cerebras](https://cloud.cerebras.ai) | AI API — `llama3.1-8b` (default), `qwen-3-235b-a22b-instruct-2507`, and more | Everything | 1M tokens/day, 30 req/min |
+| [Cerebras](https://cloud.cerebras.ai) | AI API — `gpt-oss-120b` (default), `qwen-3-235b-a22b-instruct-2507`, and more | Everything | 1M tokens/day, 30 req/min |
 | [GitHub](https://github.com) | Source code | Everything | Always free |
 | [PythonAnywhere](https://www.pythonanywhere.com) | Hosting the bot | Deployment | 1 web app, 512MB disk, monthly renewal click required |
 
@@ -192,7 +192,7 @@ Paste in:
 TELEGRAM_BOT_TOKEN=<your BotFather token>
 AI_API_KEY=<your Cerebras API key>
 AI_BASE_URL=https://api.cerebras.ai/v1
-AI_MODEL=llama3.1-8b
+AI_MODEL=gpt-oss-120b
 SQLITE_PATH=/home/<your-pa-username>/bot.db
 WEBHOOK_URL=https://<your-pa-username>.pythonanywhere.com/api/webhook
 ```
@@ -362,7 +362,7 @@ Reload (or push) for the change to take effect: the list is read at worker boot.
 | What to change | How |
 |---|---|
 | Bot personality / instructions | Edit `SYSTEM_PROMPT` in `bot/config.py` |
-| AI model | Set `AI_MODEL` env var (free-tier tested: `llama3.1-8b` (default), `qwen-3-235b-a22b-instruct-2507`, `gpt-oss-120b`) |
+| AI model | Set `AI_MODEL` env var (free-tier tested: `gpt-oss-120b` (default), `qwen-3-235b-a22b-instruct-2507`) |
 | AI provider | Set `AI_BASE_URL` env var (any OpenAI-compatible endpoint) |
 | Secure the webhook | Auto-generated on first boot — see "Secure the webhook" above |
 | Restrict who can use the bot | Set `ALLOWED_USERS` env var |
