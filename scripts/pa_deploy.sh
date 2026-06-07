@@ -80,6 +80,14 @@ if [ -z "$REPO_URL" ]; then
 fi
 REPO_NAME="$(basename "$REPO_URL" .git)"
 
+# PA consoles have no SSH key for GitHub, so convert SSH remotes to HTTPS
+# for the remote clone (works for public repos).
+CLONE_URL="$REPO_URL"
+case "$CLONE_URL" in
+  git@github.com:*)       CLONE_URL="https://github.com/${CLONE_URL#git@github.com:}" ;;
+  ssh://git@github.com/*) CLONE_URL="https://github.com/${CLONE_URL#ssh://git@github.com/}" ;;
+esac
+
 PA_API="https://www.pythonanywhere.com/api/v0/user/$PA_USERNAME"
 AUTH_HEADER="Authorization: Token $PA_API_TOKEN"
 DOMAIN="${PA_USERNAME}.pythonanywhere.com"
@@ -180,33 +188,43 @@ send_input() {
     "$PA_API/consoles/$CONSOLE_ID/send_input/"
 }
 
-# Wait until a unique marker shows up in the console output, then return.
+# Wait until a unique marker shows up in the console output, then return
+# 0 on the OK marker or 1 on the FAIL marker (printing recent output).
 wait_for_marker() {
-  local marker="$1" timeout="${2:-180}" elapsed=0 output
+  local marker="$1" timeout="${2:-180}" label="${3:-command}" elapsed=0 output
   while [ "$elapsed" -lt "$timeout" ]; do
     sleep 3
     elapsed=$((elapsed + 3))
     output=$(curl -sS -H "$AUTH_HEADER" "$PA_API/consoles/$CONSOLE_ID/get_latest_output/" \
       | python3 -c "import json,sys; print(json.load(sys.stdin).get('output',''))")
-    if printf '%s' "$output" | grep -q -- "$marker"; then
+    if printf '%s' "$output" | grep -q -- "${marker}_FAIL"; then
+      echo "ERROR: [$label] failed on the PA console. Recent console output:" >&2
+      printf '%s\n' "$output" | tail -15 >&2
+      return 1
+    fi
+    if printf '%s' "$output" | grep -q -- "${marker}_OK"; then
       return 0
     fi
   done
-  echo "ERROR: console command timed out waiting for marker '$marker'." >&2
+  echo "ERROR: [$label] timed out waiting for marker '$marker'." >&2
   return 1
 }
 
 run_remote() {
-  # Run a one-liner on the remote shell, then wait for a unique done-marker.
+  # Run a one-liner on the remote shell, then wait for a unique done-marker
+  # that carries the command's success/failure. The single-quotes around the
+  # OK/FAIL suffixes keep the *typed* command line (which PA echoes back in
+  # the console output) from matching the markers we grep for — only the
+  # executed echo produces the contiguous marker string.
   local label="$1" cmd="$2" timeout="${3:-180}"
-  local marker="__PADEPLOY_DONE_$(date +%s%N)_$$__"
+  local marker="__PADEPLOY_$(date +%s%N)_$$__"
   echo "    [$label] running..."
-  send_input "$cmd; echo $marker"
-  wait_for_marker "$marker" "$timeout"
+  send_input "{ $cmd; } && echo ${marker}_'OK' || echo ${marker}_'FAIL'"
+  wait_for_marker "$marker" "$timeout" "$label"
 }
 
 run_remote "git clone or pull" \
-  "if [ -d $PROJECT_DIR ]; then cd $PROJECT_DIR && git pull --ff-only; else git clone $REPO_URL $PROJECT_DIR; fi" \
+  "if [ -d $PROJECT_DIR/.git ]; then cd $PROJECT_DIR && git pull --ff-only; else git clone $CLONE_URL $PROJECT_DIR; fi" \
   120
 
 run_remote "create venv (if missing)" \
