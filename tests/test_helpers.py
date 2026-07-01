@@ -22,7 +22,7 @@ def test_send_reply_short_text():
         msg = make_message()
         send_reply(msg, "Hello!")
         mock_bot.send_message.assert_called_once_with(
-            msg.chat.id, "Hello!", parse_mode="Markdown"
+            msg.chat.id, "Hello!", parse_mode="Markdown", reply_markup=None
         )
 
 

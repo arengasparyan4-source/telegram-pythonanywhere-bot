@@ -1,4 +1,17 @@
-import fcntl
+try:
+    import fcntl
+except ImportError:  # Windows: deploy locking is only used on PythonAnywhere/Linux.
+    class _FcntlCompat:
+        LOCK_EX = 0
+        LOCK_NB = 0
+        LOCK_UN = 0
+
+        @staticmethod
+        def flock(_fd, _operation):
+            return None
+
+    fcntl = _FcntlCompat()
+
 import hmac
 import os
 import subprocess

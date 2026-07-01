@@ -3,4 +3,8 @@ pyTelegramBotAPI==4.32.0
 openai==2.30.0
 requests==2.33.1
 gradio-client==1.7.0
+fpdf2==2.8.7
+# Voice features: openai (above) also covers Whisper transcription;
+# elevenlabs powers voice cloning + cloned-voice TTS replies.
+elevenlabs==1.13.0
 pytest==9.0.2

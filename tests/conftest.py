@@ -20,6 +20,7 @@ mock_bot_instance = MagicMock()
 mock_bot_instance.get_me.return_value = MagicMock(id=42, username="testbot")
 # Decorators must pass through so handler functions remain callable
 mock_bot_instance.message_handler.return_value = lambda f: f
+mock_bot_instance.callback_query_handler.return_value = lambda f: f
 
 mock_telebot = MagicMock()
 mock_telebot.TeleBot.return_value = mock_bot_instance
@@ -35,3 +36,7 @@ sys.modules["telebot.types"] = MagicMock()
 sys.modules["openai"] = MagicMock()
 sys.modules["flask"] = mock_flask
 sys.modules["gradio_client"] = MagicMock()
+# bot/voice.py imports these lazily inside functions, so import-time is
+# safe without them — but mock them so voice tests can import/patch freely.
+sys.modules["elevenlabs"] = MagicMock()
+sys.modules["elevenlabs.client"] = MagicMock()

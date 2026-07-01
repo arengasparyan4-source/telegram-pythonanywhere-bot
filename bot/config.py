@@ -89,6 +89,27 @@ HF_SPACE_ID = os.environ.get("HF_SPACE_ID", "").strip()
 HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()  # optional, for private spaces
 DEFAULT_PROVIDER = "main"
 
+# Voice features (all optional, all degrade gracefully in bot/voice.py).
+#
+# Transcription of incoming voice messages uses OpenAI Whisper. It needs
+# its own key because the main provider (Cerebras) is chat-only — it has
+# no audio endpoint. Leave OPENAI_API_KEY unset to disable voice input.
+# WHISPER_BASE_URL lets you point at any OpenAI-compatible transcription
+# endpoint (e.g. Groq); empty means OpenAI's default.
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+WHISPER_BASE_URL = os.environ.get("WHISPER_BASE_URL", "").strip()
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "whisper-1").strip()
+
+# ElevenLabs Instant Voice Clone + TTS. When set, /recordvoice lets a
+# user clone their own voice and the bot replies with a voice note in
+# that voice. Unset = voice cloning disabled (bot replies as text).
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+ELEVENLABS_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2").strip()
+
+# How long (seconds) the bot waits for a voice sample after /recordvoice
+# before the "next voice message is a clone sample" flag expires.
+VOICE_SAMPLE_WAIT_TTL = 600
+
 # Storage — optional. When SQLITE_PATH is unset the bot runs in
 # stateless mode: history / rate limiting / preferences / dedupe all
 # degrade gracefully (the consumer modules in bot/ check `store is
@@ -107,12 +128,33 @@ DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET", "").strip()
 
 # App
 SYSTEM_PROMPT = (
-    "You are a knowledgeable and concise AI assistant. "
-    "Answer clearly and directly. Avoid unnecessary filler. "
-    "Keep responses appropriately brief for a chat interface."
+    "You are an educational assistant that helps schoolchildren study any subject from their textbooks. "
+    "When the student gives you a textbook title or topic, research it thoroughly and accurately. "
+    "Summarize the material into a clear, well-structured conspectus (study notes) highlighting the most interesting facts and important details. "
+    "Write in a way that is engaging and easy for a child to understand and retell in their own words. "
+    "Keep your response focused and appropriately concise for a chat interface. "
+    "Always reply in the same language the student is writing in (for example Armenian, Russian, or English), "
+    "matching their language naturally for the entire reply. "
+    "Speak warmly and conversationally, like a friendly tutor talking with a child — never robotic, stiff, or generic."
+)
+
+# Appended to the system prompt only when the student has no prior
+# conversation history (a brand-new user). Until they establish a
+# language, the bot greets and replies in Armenian by default.
+NEW_USER_HINT = (
+    "This is the very beginning of the conversation and the student has not established a language yet. "
+    "Reply in Armenian (հայերեն) unless they clearly write in another language, and welcome them warmly."
 )
 MAX_HISTORY = 20  # messages kept per user (10 conversation turns)
 HISTORY_TTL = 2592000  # conversation history expires after 30 days (seconds)
+
+# Quiz mode (Feature 1). After a conspectus the student can take a short
+# multiple-choice quiz generated from that conspectus to check understanding.
+QUIZ_NUM_QUESTIONS = 4  # how many questions to generate per quiz
+QUIZ_TTL = 3600  # an in-progress quiz expires after 1 hour (seconds)
+# The most recent conspectus is cached per user so /quiz, the inline
+# buttons, and PDF export can act on it without re-asking the AI.
+CONSPECTUS_TTL = HISTORY_TTL  # cached conspectus expires alongside history
 RATE_LIMIT = int(os.environ.get("RATE_LIMIT", "250"))  # max messages per user per day
 
 # Comma-separated whitelist of Telegram users. Each entry is either a

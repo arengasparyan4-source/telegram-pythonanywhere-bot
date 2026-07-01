@@ -24,6 +24,8 @@ def test_handle_message_calls_ask_ai():
         patch("bot.handlers.is_rate_limited", return_value=False),
         patch("bot.handlers.BOT_INFO", MagicMock(username="testbot")),
         patch("bot.handlers.ask_ai", return_value="AI reply") as mock_ask,
+        patch("bot.handlers.get_provider", return_value="main"),
+        patch("bot.handlers.save_last_conspectus") as mock_save_consp,
         patch("bot.handlers.send_reply") as mock_send,
         patch("bot.handlers.bot"),
     ):
@@ -32,7 +34,14 @@ def test_handle_message_calls_ask_ai():
         msg = make_message(text="hello")
         handle_message(msg)
         mock_ask.assert_called_once_with(123, "hello")
-        mock_send.assert_called_once_with(msg, "AI reply")
+        # Main-provider replies are conspectuses: cached + sent with the
+        # inline keyboard (quiz button, etc.).
+        mock_save_consp.assert_called_once_with(123, "hello", "AI reply")
+        assert mock_send.call_count == 1
+        args, kwargs = mock_send.call_args
+        assert args[0] is msg
+        assert args[1] == "AI reply"
+        assert kwargs.get("reply_markup") is not None
 
 
 def test_handle_message_skips_when_not_responding():
@@ -59,7 +68,7 @@ def test_handle_message_rate_limited():
         handle_message(make_message())
         mock_ask.assert_not_called()
         mock_bot.send_message.assert_called_once()
-        assert "daily limit" in mock_bot.send_message.call_args[0][1]
+        assert "սահմանին" in mock_bot.send_message.call_args[0][1]
 
 
 def test_handle_message_sends_generic_error():
@@ -74,7 +83,7 @@ def test_handle_message_sends_generic_error():
 
         handle_message(make_message())
         error_msg = mock_bot.send_message.call_args[0][1]
-        assert "Something went wrong" in error_msg
+        assert "Ինչ-որ բան այնպես չգնաց" in error_msg
         assert "API key" not in error_msg
 
 
@@ -147,7 +156,7 @@ def test_cmd_about_includes_commit_sha_when_set():
 
         cmd_about(make_message())
         sent = mock_bot.send_message.call_args[0][1]
-        assert "Version: abc1234" in sent
+        assert "Տարբերակ: abc1234" in sent
 
 
 def test_cmd_about_omits_version_line_when_sha_unknown():
@@ -163,7 +172,7 @@ def test_cmd_about_omits_version_line_when_sha_unknown():
 
         cmd_about(make_message())
         sent = mock_bot.send_message.call_args[0][1]
-        assert "Version" not in sent
+        assert "Տարբերակ" not in sent
 
 
 def test_cmd_about_without_store():
@@ -179,7 +188,7 @@ def test_cmd_about_without_store():
 
         cmd_about(make_message())
         sent = mock_bot.send_message.call_args[0][1]
-        assert "stateless" in sent
+        assert "առանց հիշողության" in sent
 
 
 # ── /model command ────────────────────────────────────────────────────────────
@@ -213,7 +222,7 @@ def test_cmd_model_no_args_shows_current():
         msg = make_message(text="/model")
         cmd_model(msg)
         sent = mock_bot.send_message.call_args[0][1]
-        assert "Current provider: main" in sent
+        assert "Ընթացիկ մատակարարը՝ main" in sent
         assert "/model main" in sent
         assert "/model hf" in sent
 
@@ -229,7 +238,7 @@ def test_cmd_model_switch_to_hf():
         mock_set.assert_called_once_with(123, "hf")
         sent = mock_bot.send_message.call_args[0][1]
         assert "hf" in sent
-        assert "Armenian" in sent
+        assert "հայերեն" in sent
 
 
 def test_cmd_model_switch_to_main():
@@ -242,7 +251,7 @@ def test_cmd_model_switch_to_main():
         cmd_model(msg)
         mock_set.assert_called_once_with(123, "main")
         sent = mock_bot.send_message.call_args[0][1]
-        assert "Main" in sent
+        assert "հիմնական" in sent
 
 
 def test_cmd_model_invalid_choice():
@@ -254,7 +263,7 @@ def test_cmd_model_invalid_choice():
         msg = make_message(text="/model bogus")
         cmd_model(msg)
         mock_set.assert_not_called()
-        assert "Invalid" in mock_bot.send_message.call_args[0][1]
+        assert "Սխալ" in mock_bot.send_message.call_args[0][1]
 
 
 def test_cmd_model_redis_error_reports_failure():
@@ -265,7 +274,7 @@ def test_cmd_model_redis_error_reports_failure():
     ):
         msg = make_message(text="/model hf")
         cmd_model(msg)
-        assert "Could not save" in mock_bot.send_message.call_args[0][1]
+        assert "Չստացվեց" in mock_bot.send_message.call_args[0][1]
 
 
 def test_cmd_model_not_registered_without_hf_space_id():
