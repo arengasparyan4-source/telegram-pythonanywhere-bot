@@ -115,6 +115,11 @@ def main() -> None:
         bot.remove_webhook()
         print("Webhook removed.\n")
 
+    # Start the daily /remind scheduler so reminders fire while polling.
+    from bot.scheduler import start_scheduler
+
+    start_scheduler()
+
     print("Send your bot a message on Telegram to try it out.")
     print("Press Ctrl+C to stop.\n")
 

@@ -5,16 +5,41 @@ from datetime import datetime
 from telebot import types
 from bot.clients import bot, BOT_INFO, store
 from bot.config import COMMIT_SHA, HF_SPACE_ID, HOSTING_LABEL, MODEL, RATE_LIMIT
-from bot.ai import ask_ai, expand_conspectus, generate_quiz
+from bot.ai import (
+    ask_ai,
+    expand_conspectus,
+    generate_flashcards,
+    generate_mindmap,
+    generate_quiz,
+    generate_story,
+    generate_why_matters,
+)
+from bot.achievements import check_and_award, get_badges
+from bot.activity import record_activity
 from bot.conspectus import get_last_conspectus, save_last_conspectus
 from bot.grade import clear_grade, get_grade, set_grade
 from bot.helpers import is_allowed, keep_typing, send_reply, should_respond
 from bot.history import clear_history
 from bot.jokes import jokes_disabled, set_jokes_disabled
+from bot.parent import build_report, link_child
 from bot.pdf import build_conspectus_pdf
 from bot.preferences import get_provider, set_provider
 from bot.quiz import clear_quiz, get_quiz, save_quiz, update_quiz
 from bot.rate_limit import is_rate_limited
+from bot.reminders import (
+    REPEAT_HEADER,
+    clear_reminder,
+    get_reminder,
+    normalize_time,
+    set_reminder,
+)
+from bot.stats import (
+    get_stats,
+    incr_conspectuses,
+    incr_flashcards,
+    incr_quizzes,
+    incr_topics,
+)
 from bot.voice import transcribe, whisper_enabled
 
 # Verbose console logging for local dev and teaching. Enabled by
@@ -72,6 +97,11 @@ def cmd_help(message):
         "/help — տեսնել հրամանների ցանկը և օգնության ինֆորմացիա",
         "/quiz — կարճ վիկտորինա վերջին կոնսպեկտի հիման վրա",
         "/pdf — ստանալ վերջին կոնսպեկտը PDF ֆայլով",
+        "/stats — տեսնել քո ուսումնական վիճակագրությունը",
+        "/achievements — տեսնել քո վաստակած նշանները",
+        "/repeat — կրկնել վերջին կոնսպեկտը",
+        "/remind — դնել օրական հիշեցում (օր․՝ /remind 18:00)",
+        "/parent — ծնողի շաբաթական հաշվետվություն (/parent <երեխայի ID>)",
         "/grade — ընտրել դասարանը, որ բացատրությունները հարմարեցնեմ քեզ",
         "/reset — մաքրել մեր նախորդ զրույցի պատմությունը և սկսել նորից",
         "/about — իմանալ ավելին այս բոտի մասին",
@@ -105,6 +135,128 @@ def cmd_about(message):
     if COMMIT_SHA:
         lines.append(f"Տարբերակ: {COMMIT_SHA}")
     bot.send_message(message.chat.id, "\n".join(lines))
+
+
+@bot.message_handler(commands=["stats"], func=is_allowed)
+def cmd_stats(message):
+    s = get_stats(message.from_user.id)
+    bot.send_message(
+        message.chat.id,
+        "📊 Քո վիճակագրությունը:\n"
+        f"📚 Թեմաներ — {s['topics']}\n"
+        f"📝 Կոնսպեկտներ — {s['conspectuses']}\n"
+        f"🧠 Flashcard սեսիաներ — {s['flashcards']}\n"
+        f"✅ Quiz-եր — {s['quizzes']}",
+    )
+
+
+def _award_new_badges(chat_id: int, user_id: int) -> None:
+    """Award any newly-earned badges and congratulate the user for each."""
+    for badge in check_and_award(user_id):
+        bot.send_message(chat_id, f"🎉 Շնորհավո՛ր։ Դու վաստակեցիր նշան՝ {badge}")
+
+
+@bot.message_handler(commands=["achievements"], func=is_allowed)
+def cmd_achievements(message):
+    badges = get_badges(message.from_user.id)
+    if not badges:
+        bot.send_message(
+            message.chat.id,
+            "🏅 Դու դեռ նշաններ չունես։ Սովորիր, անցիր վիկտորինաներ ու հավաքիր դրանք 🙂",
+        )
+        return
+    bot.send_message(
+        message.chat.id,
+        "🏅 Քո նշանները՝\n" + "\n".join(f"• {b}" for b in badges),
+    )
+
+
+@bot.message_handler(commands=["parent"], func=is_allowed)
+def cmd_parent(message):
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) == 1 or not parts[1].strip():
+        bot.send_message(
+            message.chat.id,
+            "👨‍👩‍👧 Ծնողի ռեժիմ։ Ուղարկիր՝ /parent <երեխայի ID>\n"
+            "Օրինակ՝ /parent 123456789\n\n"
+            "Երեխայի ID-ն նրա Telegram-ի թվային նույնացուցիչն է։",
+        )
+        return
+    try:
+        child_id = int(parts[1].strip())
+    except ValueError:
+        bot.send_message(
+            message.chat.id,
+            "Երեխայի ID-ն պետք է լինի թիվ։ Օրինակ՝ /parent 123456789",
+        )
+        return
+    if store is None:
+        bot.send_message(
+            message.chat.id,
+            "Ծնողի ռեժիմը հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
+        )
+        return
+    link_child(message.from_user.id, child_id)
+    send_reply(message, build_report(child_id))
+
+
+@bot.message_handler(commands=["repeat"], func=is_allowed)
+def cmd_repeat(message):
+    consp = get_last_conspectus(message.from_user.id)
+    if not consp:
+        bot.send_message(
+            message.chat.id,
+            "Դեռ կրկնելու թեմա չկա 🙂 Ուղարկիր դասագրքի անունը կամ թեման։",
+        )
+        return
+    send_reply(
+        message,
+        f"{REPEAT_HEADER}\n\n{consp['text']}",
+        reply_markup=_conspectus_keyboard(),
+    )
+
+
+@bot.message_handler(commands=["remind"], func=is_allowed)
+def cmd_remind(message):
+    user_id = message.from_user.id
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) == 1:
+        current = get_reminder(user_id)
+        if current:
+            bot.send_message(
+                message.chat.id,
+                f"⏰ Քո օրական հիշեցումը դրված է ժամը {current}-ին։\n"
+                "Անջատելու համար գրիր /remind off։",
+            )
+        else:
+            bot.send_message(
+                message.chat.id,
+                "Հիշեցում դրված չէ։ Օրինակ՝ /remind 18:00\n"
+                "Ամեն օր այդ ժամին կուղարկեմ քո վերջին կոնսպեկտը 🙂",
+            )
+        return
+    arg = parts[1].strip().lower()
+    if arg in ("off", "անջատել"):
+        clear_reminder(user_id)
+        bot.send_message(message.chat.id, "🔕 Հիշեցումն անջատված է։")
+        return
+    hhmm = normalize_time(arg)
+    if not hhmm:
+        bot.send_message(
+            message.chat.id,
+            "Սխալ ձևաչափ։ Գրիր ժամը այսպես՝ /remind 18:00 (24-ժամյա ձևաչափով)։",
+        )
+        return
+    if not set_reminder(user_id, hhmm):
+        bot.send_message(
+            message.chat.id,
+            "Հիշեցումը հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
+        )
+        return
+    bot.send_message(
+        message.chat.id,
+        f"⏰ Հիշեցումը դրված է ամեն օր ժամը {hhmm}-ին։ Կուղարկեմ քո վերջին կոնսպեկտը 🙂",
+    )
 
 
 # ── Joke + facts (three messages in sequence) ───────────────────────────────
@@ -197,6 +349,10 @@ if HF_SPACE_ID:
 def _conspectus_keyboard():
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("📝 Կարճ վիկտորինա", callback_data="quiz:start"))
+    kb.add(types.InlineKeyboardButton("🧠 Flashcards", callback_data="cards:start"))
+    kb.add(types.InlineKeyboardButton("🗺 Mind Map", callback_data="mindmap:show"))
+    kb.add(types.InlineKeyboardButton("📖 Պատմություն", callback_data="story:show"))
+    kb.add(types.InlineKeyboardButton("🌍 Ինչու է կարևոր?", callback_data="why:show"))
     kb.row(
         types.InlineKeyboardButton("🔍 Ավելի մանրամասն", callback_data="consp:more"),
         types.InlineKeyboardButton("📚 Ուրիշ թեմա", callback_data="consp:new"),
@@ -225,7 +381,10 @@ def _more_detail(chat_id: int, user_id: int, message) -> None:
     # Cache the expanded version so a follow-up quiz / further expansion
     # builds on the deeper notes, then re-show the keyboard.
     save_last_conspectus(user_id, consp["topic"], reply)
+    incr_conspectuses(user_id)
+    record_activity(user_id)
     send_reply(message, reply, reply_markup=_conspectus_keyboard())
+    _award_new_badges(chat_id, user_id)
 
 
 def _prompt_new_topic(chat_id: int) -> None:
@@ -416,10 +575,13 @@ def _finish_quiz(chat_id: int, user_id: int, state: dict) -> None:
     score = state["score"]
     total = len(state["questions"])
     clear_quiz(user_id)
+    incr_quizzes(user_id)
+    record_activity(user_id)
     bot.send_message(
         chat_id,
         f"🎉 Վերջ։ Դու հավաքեցիր {score}/{total} միավոր։ Լավ աշխատանք էր 👏",
     )
+    _award_new_badges(chat_id, user_id)
 
 
 @bot.message_handler(commands=["quiz"], func=is_allowed)
@@ -449,6 +611,145 @@ def cb_quiz(call):
         _handle_quiz_answer(chat_id, user_id, call.data)
 
 
+# ── Flashcard mode ───────────────────────────────────────────────────────────
+def _start_flashcards(chat_id: int, user_id: int) -> None:
+    """Generate a deck from the user's last conspectus and send it card by card.
+
+    Each card is its own message (❓ question / ✅ answer) with a 1s pause so
+    the deck reads like a paced study session rather than one wall of text.
+    """
+    consp = get_last_conspectus(user_id)
+    if not consp:
+        bot.send_message(
+            chat_id,
+            "Նախ ուղարկիր դասագրքի անունը կամ թեման, որ պատրաստեմ կոնսպեկտ, "
+            "հետո կսարքեմ flashcard-ներ 🙂",
+        )
+        return
+    try:
+        with keep_typing(chat_id):
+            cards = generate_flashcards(user_id, consp["text"])
+    except Exception as e:
+        print(f"Flashcard generation error: {e}")
+        cards = []
+    if not cards:
+        bot.send_message(
+            chat_id, "Չստացվեց պատրաստել flashcard-ները։ Փորձիր նորից մի փոքր ուշ։"
+        )
+        return
+    bot.send_message(chat_id, "🧠 Ահա քո flashcard-ները՝")
+    for i, card in enumerate(cards):
+        bot.send_message(chat_id, f"❓ {card['q']}\n✅ {card['a']}")
+        if i < len(cards) - 1:
+            time.sleep(1)
+    incr_flashcards(user_id)
+    record_activity(user_id)
+    _award_new_badges(chat_id, user_id)
+
+
+@bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("cards:"))
+def cb_flashcards(call):
+    bot.answer_callback_query(call.id)
+    _start_flashcards(call.message.chat.id, call.from_user.id)
+
+
+# ── Mind map ─────────────────────────────────────────────────────────────────
+def _send_mindmap(chat_id: int, user_id: int) -> None:
+    """Generate a text mind map of the last conspectus and send it.
+
+    Sent as plain text (no Markdown) so the tree connectors and indentation
+    render exactly as generated instead of being reflowed or interpreted.
+    """
+    consp = get_last_conspectus(user_id)
+    if not consp:
+        bot.send_message(
+            chat_id,
+            "Նախ ուղարկիր դասագրքի անունը կամ թեման, որ պատրաստեմ կոնսպեկտ, "
+            "հետո կսարքեմ mind map 🙂",
+        )
+        return
+    try:
+        with keep_typing(chat_id):
+            mindmap = generate_mindmap(user_id, consp["topic"], consp["text"])
+    except Exception as e:
+        print(f"Mind map generation error: {e}")
+        mindmap = ""
+    if not (mindmap and mindmap.strip()):
+        bot.send_message(
+            chat_id, "Չստացվեց պատրաստել mind map-ը։ Փորձիր նորից մի փոքր ուշ։"
+        )
+        return
+    bot.send_message(chat_id, mindmap)
+
+
+@bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("mindmap:"))
+def cb_mindmap(call):
+    bot.answer_callback_query(call.id)
+    _send_mindmap(call.message.chat.id, call.from_user.id)
+
+
+# ── Story mode ───────────────────────────────────────────────────────────────
+def _send_story(chat_id: int, user_id: int, message) -> None:
+    """Retell the last conspectus as a short story and send it."""
+    consp = get_last_conspectus(user_id)
+    if not consp:
+        bot.send_message(
+            chat_id,
+            "Նախ ուղարկիր դասագրքի անունը կամ թեման, որ պատրաստեմ կոնսպեկտ, "
+            "հետո կպատմեմ այն որպես պատմություն 📖",
+        )
+        return
+    try:
+        with keep_typing(chat_id):
+            story = generate_story(user_id, consp["topic"], consp["text"])
+    except Exception as e:
+        print(f"Story generation error: {e}")
+        story = ""
+    if not (story and story.strip()):
+        bot.send_message(
+            chat_id, "Չստացվեց պատրաստել պատմությունը։ Փորձիր նորից մի փոքր ուշ։"
+        )
+        return
+    send_reply(message, f"📖 {story}")
+
+
+@bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("story:"))
+def cb_story(call):
+    bot.answer_callback_query(call.id)
+    _send_story(call.message.chat.id, call.from_user.id, call.message)
+
+
+# ── "Why does this matter?" ──────────────────────────────────────────────────
+def _send_why_matters(chat_id: int, user_id: int, message) -> None:
+    """Explain why the last conspectus's topic matters in real life."""
+    consp = get_last_conspectus(user_id)
+    if not consp:
+        bot.send_message(
+            chat_id,
+            "Նախ ուղարկիր դասագրքի անունը կամ թեման, որ պատրաստեմ կոնսպեկտ, "
+            "հետո կբացատրեմ՝ ինչու է դա կարևոր 🌍",
+        )
+        return
+    try:
+        with keep_typing(chat_id):
+            why = generate_why_matters(user_id, consp["topic"], consp["text"])
+    except Exception as e:
+        print(f"Why-matters generation error: {e}")
+        why = ""
+    if not (why and why.strip()):
+        bot.send_message(
+            chat_id, "Չստացվեց պատրաստել բացատրությունը։ Փորձիր նորից մի փոքր ուշ։"
+        )
+        return
+    send_reply(message, f"🌍 Ինչու է սա կարևոր՝\n\n{why}")
+
+
+@bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("why:"))
+def cb_why_matters(call):
+    bot.answer_callback_query(call.id)
+    _send_why_matters(call.message.chat.id, call.from_user.id, call.message)
+
+
 @bot.message_handler(content_types=["text"], func=is_allowed)
 def handle_message(message):
     if not should_respond(message):
@@ -472,7 +773,11 @@ def handle_message(message):
         # output as a plain reply with no buttons or caching.
         if get_provider(message.from_user.id) == "main":
             save_last_conspectus(message.from_user.id, text, reply)
+            incr_topics(message.from_user.id)
+            incr_conspectuses(message.from_user.id)
+            record_activity(message.from_user.id)
             send_reply(message, reply, reply_markup=_conspectus_keyboard())
+            _award_new_badges(message.chat.id, message.from_user.id)
         else:
             send_reply(message, reply)
         _log(message, "out", reply)
@@ -533,7 +838,11 @@ def handle_voice(message):
         # worth caching / quizzing / showing the inline keyboard for.
         if get_provider(user_id) == "main":
             save_last_conspectus(user_id, transcript, reply)
+            incr_topics(user_id)
+            incr_conspectuses(user_id)
+            record_activity(user_id)
             send_reply(message, full_reply, reply_markup=_conspectus_keyboard())
+            _award_new_badges(chat_id, user_id)
         else:
             send_reply(message, full_reply)
         _log(message, "out", reply)

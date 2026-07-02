@@ -63,3 +63,9 @@ from api.index import app as application  # noqa: E402, F401
 from bot.clients import register_webhook  # noqa: E402
 
 print(register_webhook())
+
+# Start the daily /remind scheduler. Best-effort on PA free tier (a worker
+# only runs while serving requests); see bot/scheduler.py for the caveat.
+from bot.scheduler import start_scheduler  # noqa: E402
+
+start_scheduler()

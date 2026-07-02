@@ -4,6 +4,9 @@ openai==2.30.0
 requests==2.33.1
 gradio-client==1.7.0
 fpdf2==2.8.7
+# Daily /remind reminders (in-process scheduler). Pure-Python, light —
+# fine on PA free tier. See bot/scheduler.py for the free-tier caveat.
+APScheduler==3.11.0
 # Voice input (optional): openai-whisper transcribes incoming voice notes
 # on-device (needs ffmpeg on PATH). Commented out for the PythonAnywhere
 # free tier — it pulls in torch (~1GB+), which exceeds the free disk quota

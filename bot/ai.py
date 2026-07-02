@@ -1,7 +1,12 @@
 import json
 import re
 
-from bot.config import NEW_USER_HINT, QUIZ_NUM_QUESTIONS, SYSTEM_PROMPT
+from bot.config import (
+    FLASHCARD_NUM,
+    NEW_USER_HINT,
+    QUIZ_NUM_QUESTIONS,
+    SYSTEM_PROMPT,
+)
 from bot.grade import get_grade
 from bot.history import get_history, save_history
 from bot.providers import generate
@@ -167,3 +172,150 @@ def generate_quiz(
     ]
     raw = generate(user_id, messages)
     return _parse_quiz(raw, num_questions)
+
+
+def _parse_flashcards(raw: str, num_cards: int) -> list:
+    """Validate the model's JSON into a clean list of {"q", "a"} dicts.
+
+    Returns [] on any parse/shape problem so the caller can fall back to a
+    friendly "couldn't build flashcards" message rather than crashing. Each
+    accepted card needs a non-empty question and answer string.
+    """
+    if not raw:
+        return []
+    try:
+        data = json.loads(_strip_code_fence(raw))
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    cards = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        q = item.get("q")
+        a = item.get("a")
+        if not isinstance(q, str) or not q.strip():
+            continue
+        if not isinstance(a, str) or not a.strip():
+            continue
+        cards.append({"q": q.strip(), "a": a.strip()})
+        if len(cards) >= num_cards:
+            break
+    return cards
+
+
+def generate_flashcards(
+    user_id: int, conspectus_text: str, num_cards: int = FLASHCARD_NUM
+) -> list:
+    """Generate question/answer flashcards from a conspectus.
+
+    Cards are drawn ONLY from the provided conspectus text so they revise
+    exactly what the student just read. The model answers in the
+    conspectus's own language and returns strict JSON; `_parse_flashcards`
+    validates it. Returns a list of {"q", "a"} dicts, or [] on failure.
+    """
+    instruction = (
+        f"Based ONLY on the following study notes, write exactly {num_cards} short "
+        "flashcards that help a child revise the material. Each flashcard is a "
+        "question and its concise answer. Write the questions and answers in the "
+        "SAME language as the study notes. Keep everything simple and age-appropriate."
+        + _grade_clause(user_id)
+        + " "
+        'Return ONLY valid JSON and nothing else: a list of objects, each with keys '
+        '"q" (the question string) and "a" (the answer string). '
+        "Do not wrap the JSON in code fences.\n\n"
+        f"Study notes:\n{conspectus_text}"
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a flashcard generator for schoolchildren. You output only strict JSON.",
+        },
+        {"role": "user", "content": instruction},
+    ]
+    raw = generate(user_id, messages)
+    return _parse_flashcards(raw, num_cards)
+
+
+# Example tree shown to the model so it copies the exact format. Kept as a
+# constant so the /mindmap prompt and any tests reference the same shape.
+_MINDMAP_EXAMPLE = (
+    "🌍 Գլխավոր թեմա\n"
+    "  ├── 📌 Ենթաթեմա 1\n"
+    "  │     ├── մանրամասն\n"
+    "  │     └── մանրամասն\n"
+    "  ├── 📌 Ենթաթեմա 2\n"
+    "  └── 📌 Ենթաթեմա 3"
+)
+
+
+def generate_mindmap(user_id: int, topic: str, conspectus_text: str) -> str:
+    """Generate a text mind map of the topic in the fixed tree format.
+
+    One-shot call (does not touch conversation history). The model is shown
+    the exact indentation/tree/emoji format to copy and told to answer in
+    the conspectus's own language. Any code fence the model adds is stripped.
+    """
+    instruction = (
+        f"Create a text-based mind map of the topic «{topic}», based ONLY on these "
+        "study notes. Use EXACTLY this indentation, tree connectors (├──, └──, │) "
+        "and emoji-bullet format — copy the structure precisely:\n\n"
+        f"{_MINDMAP_EXAMPLE}\n\n"
+        "The first line is the main topic with a single leading emoji. Add 3-5 "
+        "subtopics, each on its own line marked with 📌, and 1-3 short details "
+        "indented under each subtopic. Keep every line short. Reply in the SAME "
+        "language as the study notes." + _grade_clause(user_id) + " "
+        "Output ONLY the mind map — no title, no explanation, no code fences.\n\n"
+        f"Study notes:\n{conspectus_text}"
+    )
+    messages = [
+        {"role": "system", "content": _build_system_prompt(user_id)},
+        {"role": "user", "content": instruction},
+    ]
+    return _strip_code_fence(generate(user_id, messages))
+
+
+def generate_story(user_id: int, topic: str, conspectus_text: str) -> str:
+    """Retell the topic as an engaging short story for a child.
+
+    One-shot call (does not touch conversation history). Turns the same
+    facts into a 3-5 paragraph adventure, kept accurate and age-appropriate,
+    in the conspectus's own language.
+    """
+    instruction = (
+        f"Retell the topic «{topic}» as an engaging short story for a child, based "
+        "ONLY on these study notes. Write 3-5 short paragraphs that turn the facts "
+        "into a little adventure the child will enjoy, while keeping every fact "
+        "accurate. Make it warm and vivid, not a dry summary. Reply in the SAME "
+        "language as the study notes." + _grade_clause(user_id) + " "
+        "Output ONLY the story.\n\n"
+        f"Study notes:\n{conspectus_text}"
+    )
+    messages = [
+        {"role": "system", "content": _build_system_prompt(user_id)},
+        {"role": "user", "content": instruction},
+    ]
+    return generate(user_id, messages)
+
+
+def generate_why_matters(user_id: int, topic: str, conspectus_text: str) -> str:
+    """Explain, in 3-4 sentences, why the topic matters in real life.
+
+    One-shot call (does not touch conversation history). Uses concrete
+    everyday examples a child can relate to, in the conspectus's language.
+    """
+    instruction = (
+        f"In 3-4 short sentences, explain why the topic «{topic}» matters in real "
+        "life. Use concrete, everyday examples a child can relate to — things they "
+        "see or do at home, at school, or outside. Base it ONLY on these study "
+        "notes and keep it warm and simple. Reply in the SAME language as the study "
+        "notes." + _grade_clause(user_id) + " "
+        "Output ONLY the explanation.\n\n"
+        f"Study notes:\n{conspectus_text}"
+    )
+    messages = [
+        {"role": "system", "content": _build_system_prompt(user_id)},
+        {"role": "user", "content": instruction},
+    ]
+    return generate(user_id, messages)

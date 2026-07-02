@@ -141,6 +141,10 @@ HISTORY_TTL = 2592000  # conversation history expires after 30 days (seconds)
 # multiple-choice quiz generated from that conspectus to check understanding.
 QUIZ_NUM_QUESTIONS = 4  # how many questions to generate per quiz
 QUIZ_TTL = 3600  # an in-progress quiz expires after 1 hour (seconds)
+
+# Flashcard mode. After a conspectus the student can pull a short deck of
+# question/answer cards generated from that conspectus, sent one by one.
+FLASHCARD_NUM = 5  # how many flashcards to generate per session
 # The most recent conspectus is cached per user so /quiz, the inline
 # buttons, and PDF export can act on it without re-asking the AI.
 CONSPECTUS_TTL = HISTORY_TTL  # cached conspectus expires alongside history
