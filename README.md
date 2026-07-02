@@ -264,13 +264,13 @@ PA free-tier web apps must be renewed every month by clicking a button in the da
 2. Find the "Run until N days from today" button near the top
 3. Click it — your bot gets another month
 
-If you ever need to update the bot after pushing new code to GitHub, run this in a PA Bash console:
+If you ever need to update the bot by hand after pushing new code to GitHub, run this in a PA Bash console:
 
 ```bash
-cd ~/telegram-pythonanywhere-bot && git pull && touch /var/www/<your-pa-username>_pythonanywhere_com_wsgi.py
+cd ~/telegram-pythonanywhere-bot && git fetch origin && git reset --hard origin/main && touch /var/www/<your-pa-username>_pythonanywhere_com_wsgi.py
 ```
 
-(The `touch` forces PA to reload the worker without needing to click Reload in the dashboard.)
+This is the same convergence the auto-deploy endpoint performs: it puts the checkout exactly at your latest pushed commit (discarding any local edits to tracked files — a plain `git pull` would refuse and get stuck instead), and the `touch` forces PA to reload the worker without needing to click Reload in the dashboard.
 
 ---
 
