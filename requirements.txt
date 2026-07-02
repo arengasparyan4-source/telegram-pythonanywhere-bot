@@ -4,7 +4,11 @@ openai==2.30.0
 requests==2.33.1
 gradio-client==1.7.0
 fpdf2==2.8.7
-# Voice features: openai (above) also covers Whisper transcription;
-# elevenlabs powers voice cloning + cloned-voice TTS replies.
-elevenlabs==1.13.0
+# Voice input (optional): openai-whisper transcribes incoming voice notes
+# on-device (needs ffmpeg on PATH). Commented out for the PythonAnywhere
+# free tier — it pulls in torch (~1GB+), which exceeds the free disk quota
+# and would break `pip install -r`. Uncomment on a machine/plan with room
+# for it; the bot degrades gracefully without it (voice input replies with
+# a disabled notice, text chat / quiz / PDF / jokes all keep working).
+# openai-whisper==20250625
 pytest==9.0.2

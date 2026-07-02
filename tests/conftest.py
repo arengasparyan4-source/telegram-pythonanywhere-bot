@@ -36,7 +36,7 @@ sys.modules["telebot.types"] = MagicMock()
 sys.modules["openai"] = MagicMock()
 sys.modules["flask"] = mock_flask
 sys.modules["gradio_client"] = MagicMock()
-# bot/voice.py imports these lazily inside functions, so import-time is
-# safe without them — but mock them so voice tests can import/patch freely.
-sys.modules["elevenlabs"] = MagicMock()
-sys.modules["elevenlabs.client"] = MagicMock()
+# bot/voice.py imports whisper lazily inside functions, so import-time is
+# safe without it — but mock it so whisper_enabled() reports True in tests
+# and the voice tests can patch freely.
+sys.modules["whisper"] = MagicMock()

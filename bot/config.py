@@ -89,26 +89,15 @@ HF_SPACE_ID = os.environ.get("HF_SPACE_ID", "").strip()
 HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()  # optional, for private spaces
 DEFAULT_PROVIDER = "main"
 
-# Voice features (all optional, all degrade gracefully in bot/voice.py).
+# Voice input (fully free, degrades gracefully in bot/voice.py).
 #
-# Transcription of incoming voice messages uses OpenAI Whisper. It needs
-# its own key because the main provider (Cerebras) is chat-only — it has
-# no audio endpoint. Leave OPENAI_API_KEY unset to disable voice input.
-# WHISPER_BASE_URL lets you point at any OpenAI-compatible transcription
-# endpoint (e.g. Groq); empty means OpenAI's default.
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
-WHISPER_BASE_URL = os.environ.get("WHISPER_BASE_URL", "").strip()
-WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "whisper-1").strip()
-
-# ElevenLabs Instant Voice Clone + TTS. When set, /recordvoice lets a
-# user clone their own voice and the bot replies with a voice note in
-# that voice. Unset = voice cloning disabled (bot replies as text).
-ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "").strip()
-ELEVENLABS_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2").strip()
-
-# How long (seconds) the bot waits for a voice sample after /recordvoice
-# before the "next voice message is a clone sample" flag expires.
-VOICE_SAMPLE_WAIT_TTL = 600
+# Transcription of incoming voice messages uses the local openai-whisper
+# library — no API key, runs on-device (needs ffmpeg on PATH). WHISPER_MODEL
+# is the model *size*: "tiny" / "base" / "small" / "medium" / "large".
+# Bigger = more accurate but slower and heavier on RAM/disk. "base" is a
+# good balance for Armenian on modest hardware. The bot replies with plain
+# text only — there is no voice output.
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base").strip()
 
 # Storage — optional. When SQLITE_PATH is unset the bot runs in
 # stateless mode: history / rate limiting / preferences / dedupe all

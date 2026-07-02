@@ -15,18 +15,7 @@ from bot.pdf import build_conspectus_pdf
 from bot.preferences import get_provider, set_provider
 from bot.quiz import clear_quiz, get_quiz, save_quiz, update_quiz
 from bot.rate_limit import is_rate_limited
-from bot.voice import (
-    clear_awaiting_sample,
-    clone_voice,
-    elevenlabs_enabled,
-    get_voice_id,
-    is_awaiting_sample,
-    set_awaiting_sample,
-    set_voice_id,
-    synthesize,
-    transcribe,
-    whisper_enabled,
-)
+from bot.voice import transcribe, whisper_enabled
 
 # Verbose console logging for local dev and teaching. Enabled by
 # BOT_VERBOSE_LOG=1 (run_local.py sets this automatically). Prints one
@@ -162,28 +151,6 @@ def cmd_joke(message):
         _log(message, "out", reply)
         if i < len(steps) - 1:
             time.sleep(1.5)
-
-
-# ── Voice cloning (/recordvoice) ────────────────────────────────────────────
-@bot.message_handler(commands=["recordvoice"], func=is_allowed)
-def cmd_recordvoice(message):
-    if not elevenlabs_enabled():
-        bot.send_message(
-            message.chat.id, "Ձայնի կլոնավորումը միացված չէ այս բոտում 🙂"
-        )
-        return
-    if not set_awaiting_sample(message.from_user.id):
-        # No store == no place to remember we're waiting for the sample.
-        bot.send_message(
-            message.chat.id,
-            "Այս գործառույթը հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
-        )
-        return
-    bot.send_message(
-        message.chat.id,
-        "🎙️ Ուղարկիր ինձ 30–60 վայրկյան տևողությամբ ձայնային հաղորդագրություն, "
-        "որ սովորեմ քո ձայնը։ Խոսիր հանգիստ ու պարզ 🙂",
-    )
 
 
 if HF_SPACE_ID:
@@ -516,59 +483,21 @@ def handle_message(message):
 
 
 # ── Voice messages ──────────────────────────────────────────────────────────
-# Telegram voice notes serve two purposes here: a /recordvoice clone sample,
-# or a spoken message to transcribe and answer like normal text. The handler
-# branches on the per-user "awaiting sample" flag set by /recordvoice.
-CAPTION_LIMIT = 1024  # Telegram caption max; the transcript line rides here
-
-
-def _enroll_voice_sample(chat_id: int, user_id: int, audio_bytes: bytes) -> None:
-    """Clone the user's voice from a /recordvoice sample and store the id."""
-    clear_awaiting_sample(user_id)
-    with keep_typing(chat_id):
-        voice_id = clone_voice(user_id, audio_bytes)
-    if not voice_id or not set_voice_id(user_id, voice_id):
-        bot.send_message(
-            chat_id,
-            "Ներողություն, չստացվեց պահպանել ձայնդ։ Փորձիր նորից /recordvoice հրամանով 🙂",
-        )
-        return
-    bot.send_message(chat_id, "✅ Ձայնդ պահված է։ Հիմա կպատասխանեմ քո ձայնով։")
-
-
-def _deliver_voice_reply(message, reply: str, heard_line: str, reply_markup) -> None:
-    """Send the AI reply as a cloned-voice note when possible, else as text.
-
-    The transcription confirmation rides along as the voice note's caption,
-    or is appended to the text reply when we fall back. Any failure in the
-    TTS / send path silently degrades to text so the user still gets an answer.
-    """
-    user_id = message.from_user.id
-    voice_id = get_voice_id(user_id)
-    if voice_id:
-        audio = synthesize(reply, voice_id)
-        if audio:
-            try:
-                note = io.BytesIO(audio)
-                note.name = "reply.mp3"
-                bot.send_voice(
-                    message.chat.id,
-                    note,
-                    caption=heard_line[:CAPTION_LIMIT],
-                    reply_markup=reply_markup,
-                )
-                return
-            except Exception as e:
-                print(f"send_voice failed, falling back to text: {e}")
-    send_reply(message, f"{reply}\n\n{heard_line}", reply_markup=reply_markup)
-
-
+# A Telegram voice note is transcribed with local Whisper and answered like a
+# normal text message. The reply is plain text (no voice output); the
+# transcription confirmation is appended in Armenian.
 @bot.message_handler(content_types=["voice"], func=is_allowed)
 def handle_voice(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    # Download the voice file from Telegram (needed for both enroll + chat).
+    if not whisper_enabled():
+        bot.send_message(
+            chat_id, "Ձայնային հաղորդագրությունների ճանաչումը միացված չէ այս բոտում 🙂"
+        )
+        return
+
+    # Download the voice file from Telegram.
     try:
         file_info = bot.get_file(message.voice.file_id)
         audio_bytes = bot.download_file(file_info.file_path)
@@ -576,17 +505,6 @@ def handle_voice(message):
         print(f"Voice download error: {e}")
         bot.send_message(
             chat_id, "Չստացվեց ներբեռնել ձայնային հաղորդագրությունը։ Փորձիր նորից 🙂"
-        )
-        return
-
-    # A pending /recordvoice turns this message into a clone sample.
-    if is_awaiting_sample(user_id):
-        _enroll_voice_sample(chat_id, user_id, audio_bytes)
-        return
-
-    if not whisper_enabled():
-        bot.send_message(
-            chat_id, "Ձայնային հաղորդագրությունների ճանաչումը միացված չէ այս բոտում 🙂"
         )
         return
 
@@ -609,14 +527,15 @@ def handle_voice(message):
     try:
         with keep_typing(chat_id):
             reply = ask_ai(user_id, transcript)
-        heard_line = f"🎤 Դու ասացիր՝ «{transcript}»"
+        # Plain-text reply with the transcription confirmation appended.
+        full_reply = f"{reply}\n\n🎤 Դու ասացիր՝ «{transcript}»"
         # Same as handle_message: only the main provider yields a conspectus
         # worth caching / quizzing / showing the inline keyboard for.
         if get_provider(user_id) == "main":
             save_last_conspectus(user_id, transcript, reply)
-            _deliver_voice_reply(message, reply, heard_line, _conspectus_keyboard())
+            send_reply(message, full_reply, reply_markup=_conspectus_keyboard())
         else:
-            _deliver_voice_reply(message, reply, heard_line, None)
+            send_reply(message, full_reply)
         _log(message, "out", reply)
     except Exception as e:
         print(f"Error in handle_voice: {e}")
