@@ -130,7 +130,11 @@ def _pa_wsgi_path() -> str:
     user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
     if not user:
         return ""
-    candidate = f"/var/www/{user}_pythonanywhere_com_wsgi.py"
+    # PA names the WSGI file after the LOWERCASED domain, regardless of the
+    # username's actual case. Lowercasing here keeps auto-deploy's reload
+    # touch pointed at the file PA actually loads (a mixed-case username
+    # would otherwise touch a nonexistent path and silently skip the reload).
+    candidate = f"/var/www/{user.lower()}_pythonanywhere_com_wsgi.py"
     return candidate if os.path.exists(candidate) else ""
 
 

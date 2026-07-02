@@ -106,7 +106,11 @@ $PaApi               = "https://www.pythonanywhere.com/api/v0/user/$PaUsername"
 $Domain              = "$PaUsername.pythonanywhere.com"
 $ProjectDir          = "/home/$PaUsername/$RepoName"
 $VenvDir             = "/home/$PaUsername/.virtualenvs/telegram-bot"
-$WsgiFile            = "/var/www/${PaUsername}_pythonanywhere_com_wsgi.py"
+# PA derives the WSGI filename from the LOWERCASED domain, regardless of the
+# username's actual case. A mixed-case PA_USERNAME (e.g. "ArenGasparyan")
+# would otherwise write to a file PA never loads, leaving the default
+# "Hello World" page live. The home dir keeps the real username case.
+$WsgiFile            = "/var/www/$($PaUsername.ToLower())_pythonanywhere_com_wsgi.py"
 $WebhookUrlResolved  = "https://$Domain/api/webhook"
 $PythonVersion       = 'python313'
 
@@ -134,13 +138,31 @@ function Invoke-Pa {
     if (-not $NoAuth) { $headers['Authorization'] = "Token $PaToken" }
     $p = @{
         Uri = $uri; Method = $Method; Headers = $headers; TimeoutSec = $TimeoutSec
-        SkipHttpErrorCheck = $true; StatusCodeVariable = 'code'
+        SkipHttpErrorCheck = $true
     }
-    if ($Form)              { $p.Form = $Body }
-    elseif ($null -ne $Body) { $p.Body = $Body }
+    if ($Form) { $p.Form = $Body }
+    elseif ($null -ne $Body) {
+        if ($Body -is [System.Collections.IDictionary]) {
+            # Form-encode dictionary bodies and set the content type explicitly.
+            # Invoke-WebRequest auto-encodes a dictionary body for POST but NOT
+            # for PATCH, which then goes out with an empty Content-Type and PA
+            # rejects it with HTTP 415. Doing it by hand fixes PATCH and is
+            # identical to the auto behavior for POST.
+            $pairs = foreach ($k in $Body.Keys) {
+                '{0}={1}' -f [Uri]::EscapeDataString([string]$k), [Uri]::EscapeDataString([string]$Body[$k])
+            }
+            $p.Body = ($pairs -join '&')
+            $p.ContentType = 'application/x-www-form-urlencoded'
+        }
+        else { $p.Body = $Body }
+    }
     try {
+        # Read the status off the response object rather than via
+        # -StatusCodeVariable: some PowerShell 7 builds (e.g. certain scoop
+        # pwsh packages) ship an Invoke-WebRequest without that parameter,
+        # which would otherwise throw and be misreported as an auth failure.
         $resp = Invoke-WebRequest @p
-        return [pscustomobject]@{ Code = [int]$code; Body = [string]$resp.Content }
+        return [pscustomobject]@{ Code = [int]$resp.StatusCode; Body = [string]$resp.Content }
     } catch {
         # Network-level failure (DNS, TLS, timeout) — no HTTP status.
         return [pscustomobject]@{ Code = 0; Body = [string]$_.Exception.Message }
