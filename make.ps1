@@ -178,6 +178,21 @@ function Install-Toolchain {
     }
 }
 
+function Get-Pwsh {
+    # Return the path to a real PowerShell 7+ (pwsh), installing it via scoop
+    # if missing. deploy-pa needs it: pa_deploy.ps1 declares `#requires
+    # -Version 7.0` because it uses Invoke-WebRequest -Form / -SkipHttpErrorCheck,
+    # which Windows PowerShell 5.1 does not have. Returns $null if pwsh can't
+    # be found or installed (caller prints an actionable error).
+    if (Test-RealCommand 'pwsh') { return (Get-Command pwsh).Source }
+    Write-Host "PowerShell 7 (pwsh) not found - required by deploy-pa. Installing via scoop..." -ForegroundColor Cyan
+    if (-not (Install-Scoop)) { return $null }
+    Invoke-Scoop @('install', 'pwsh')
+    Update-SessionPath
+    if (Test-RealCommand 'pwsh') { return (Get-Command pwsh).Source }
+    return $null
+}
+
 switch ($Target.ToLower()) {
     'install' {
         Install-Toolchain
@@ -203,12 +218,24 @@ switch ($Target.ToLower()) {
     'deploy-pa' {
         Assert-Env
         $deploy = Join-Path $RepoRoot 'scripts\pa_deploy.ps1'
-        # pa_deploy.ps1 needs PowerShell 7. If we're on 5.1 but pwsh exists, use it.
-        if ($PSVersionTable.PSVersion.Major -lt 7 -and (Get-Command pwsh -ErrorAction SilentlyContinue)) {
-            Invoke-Native { & pwsh -NoProfile -File $deploy }
-        } else {
-            # In-process .ps1 call: its own `exit <code>` propagates the failure.
+        # pa_deploy.ps1 requires PowerShell 7 (`#requires -Version 7.0`).
+        if ($PSVersionTable.PSVersion.Major -ge 7) {
+            # Already on 7+: run in-process so its `exit <code>` propagates.
             & $deploy
+        } else {
+            # On Windows PowerShell 5.1 we MUST hand off to pwsh — running the
+            # script in-process here just trips its #requires guard with a
+            # cryptic error. Install pwsh via scoop if it's missing.
+            $pwsh = Get-Pwsh
+            if (-not $pwsh) {
+                Write-Host "ERROR: deploy-pa requires PowerShell 7, which is not installed and" -ForegroundColor Red
+                Write-Host "  could not be installed automatically." -ForegroundColor Red
+                Write-Host "  Install it, then re-run '.\make.ps1 deploy-pa':" -ForegroundColor Yellow
+                Write-Host "    scoop install pwsh" -ForegroundColor Yellow
+                Write-Host "    winget install Microsoft.PowerShell" -ForegroundColor Yellow
+                exit 1
+            }
+            Invoke-Native { & $pwsh -NoProfile -File $deploy }
         }
     }
     'claude' {
