@@ -11,6 +11,39 @@ from bot.grade import get_grade
 from bot.history import get_history, save_history
 from bot.providers import generate
 
+# Unicode script blocks unrelated to Armenian/Russian/English study help.
+# This is a DENYLIST (not an allowlist) so emoji, box-drawing tree connectors
+# (├── └── │), math/currency symbols, and punctuation are PRESERVED — only
+# foreign scripts the model occasionally leaks are removed. It runs on every
+# AI reply before it is sent. On already-clean text it matches nothing and
+# returns the string unchanged, so verbatim outputs (e.g. mind-map trees) are
+# byte-identical.
+_FOREIGN_SCRIPT_RE = re.compile(
+    "["
+    "぀-ヿ"  # Hiragana + Katakana (Japanese)
+    "㐀-䶿"  # CJK Extension A
+    "一-鿿"  # CJK Unified Ideographs (Chinese / Kanji)
+    "豈-﫿"  # CJK Compatibility Ideographs
+    "　-〿"  # CJK symbols & punctuation
+    "가-힯"  # Hangul syllables (Korean)
+    "ᄀ-ᇿ"  # Hangul Jamo
+    "؀-ۿ"  # Arabic
+    "ݐ-ݿ"  # Arabic Supplement
+    "ﭐ-﷿"  # Arabic Presentation Forms-A
+    "ﹰ-﻿"  # Arabic Presentation Forms-B
+    "֐-׿"  # Hebrew
+    "฀-๿"  # Thai
+    "ऀ-ॿ"  # Devanagari
+    "]+"
+)
+
+
+def sanitize_reply(text: str) -> str:
+    """Strip unrelated foreign scripts (CJK / Arabic / Hebrew / Thai / …) from
+    an AI reply, preserving Armenian, Russian, English, digits, punctuation,
+    emoji, and box-drawing characters. A no-op on clean text."""
+    return _FOREIGN_SCRIPT_RE.sub("", text)
+
 
 def _grade_clause(user_id: int) -> str:
     """Return an instruction tuning complexity to the user's grade band.
@@ -47,7 +80,7 @@ def ask_ai(user_id: int, user_message: str) -> str:
     messages = [{"role": "system", "content": system_prompt}]
     messages += history
 
-    reply = generate(user_id, messages)
+    reply = sanitize_reply(generate(user_id, messages))
 
     history.append({"role": "assistant", "content": reply})
     save_history(user_id, history)
@@ -75,7 +108,7 @@ def expand_conspectus(user_id: int, topic: str, previous_text: str) -> str:
         {"role": "system", "content": _build_system_prompt(user_id)},
         {"role": "user", "content": instruction},
     ]
-    return generate(user_id, messages)
+    return sanitize_reply(generate(user_id, messages))
 
 
 def _strip_code_fence(text: str) -> str:
@@ -127,10 +160,10 @@ def _parse_quiz(raw: str, num_questions: int) -> list:
             continue
         questions.append(
             {
-                "q": q.strip(),
-                "options": [o.strip() for o in options],
+                "q": sanitize_reply(q.strip()),
+                "options": [sanitize_reply(o.strip()) for o in options],
                 "correct": correct,
-                "explanation": str(explanation).strip(),
+                "explanation": sanitize_reply(str(explanation).strip()),
             }
         )
         if len(questions) >= num_questions:
@@ -199,7 +232,7 @@ def _parse_flashcards(raw: str, num_cards: int) -> list:
             continue
         if not isinstance(a, str) or not a.strip():
             continue
-        cards.append({"q": q.strip(), "a": a.strip()})
+        cards.append({"q": sanitize_reply(q.strip()), "a": sanitize_reply(a.strip())})
         if len(cards) >= num_cards:
             break
     return cards
@@ -273,7 +306,7 @@ def generate_mindmap(user_id: int, topic: str, conspectus_text: str) -> str:
         {"role": "system", "content": _build_system_prompt(user_id)},
         {"role": "user", "content": instruction},
     ]
-    return _strip_code_fence(generate(user_id, messages))
+    return sanitize_reply(_strip_code_fence(generate(user_id, messages)))
 
 
 def generate_story(user_id: int, topic: str, conspectus_text: str) -> str:
@@ -296,7 +329,7 @@ def generate_story(user_id: int, topic: str, conspectus_text: str) -> str:
         {"role": "system", "content": _build_system_prompt(user_id)},
         {"role": "user", "content": instruction},
     ]
-    return generate(user_id, messages)
+    return sanitize_reply(generate(user_id, messages))
 
 
 def generate_why_matters(user_id: int, topic: str, conspectus_text: str) -> str:
@@ -318,4 +351,4 @@ def generate_why_matters(user_id: int, topic: str, conspectus_text: str) -> str:
         {"role": "system", "content": _build_system_prompt(user_id)},
         {"role": "user", "content": instruction},
     ]
-    return generate(user_id, messages)
+    return sanitize_reply(generate(user_id, messages))

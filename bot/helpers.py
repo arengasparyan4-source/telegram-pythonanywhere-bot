@@ -40,10 +40,10 @@ def _split_for_telegram(text: str, limit: int) -> list[str]:
 
 
 def send_reply(message, text: str, reply_markup=None) -> None:
-    """Send a reply, splitting and Markdown-fallback safely.
+    """Send a reply, splitting and HTML-fallback safely.
 
-    Telegram's Markdown parser is strict — unbalanced ``*`` or ``[`` from
-    the model or from search-result titles will reject the entire message.
+    Telegram's HTML parser is strict — an unbalanced or unsupported tag
+    (or a stray ``<``/``&``) from the model will reject the entire message.
     On parse errors we retry the same chunk as plain text. If even the
     plain-text send fails we re-raise: the webhook caller relies on this
     signal to skip the dedupe marker so Telegram can retry.
@@ -56,10 +56,10 @@ def send_reply(message, text: str, reply_markup=None) -> None:
         markup = reply_markup if i == len(chunks) - 1 else None
         try:
             bot.send_message(
-                message.chat.id, chunk, parse_mode="Markdown", reply_markup=markup
+                message.chat.id, chunk, parse_mode="HTML", reply_markup=markup
             )
         except Exception as e:
-            print(f"Markdown send failed, retrying as plain text: {e}")
+            print(f"HTML send failed, retrying as plain text: {e}")
             bot.send_message(message.chat.id, chunk, reply_markup=markup)
 
 

@@ -1,3 +1,4 @@
+import html
 import io
 import os
 import time
@@ -83,10 +84,11 @@ def _log(message, direction: str, text: str) -> None:
 def cmd_start(message):
     bot.send_message(
         message.chat.id,
-        "Բարև 👋 Ես քո ուսումնական օգնականն եմ։ Գրիր ինձ քո դասագրքի անունը կամ թեման, "
+        "<b>Բարև 👋 Ես քո ուսումնական օգնականն եմ։</b> Գրիր ինձ քո դասագրքի անունը կամ թեման, "
         "և ես կպատրաստեմ քեզ համար հետաքրքիր ու հեշտ կոնսպեկտ։\n\n"
         "Խորհուրդ՝ /grade հրամանով նշիր քո դասարանը, որ բացատրությունները հենց քեզ համար լինեն 🙂\n\n"
         "Հրամանների ցանկը տեսնելու համար գրիր /help։",
+        parse_mode="HTML",
     )
 
 
@@ -101,7 +103,7 @@ def cmd_help(message):
         "/achievements — տեսնել քո վաստակած նշանները",
         "/repeat — կրկնել վերջին կոնսպեկտը",
         "/remind — դնել օրական հիշեցում (օր․՝ /remind 18:00)",
-        "/parent — ծնողի շաբաթական հաշվետվություն (/parent <երեխայի ID>)",
+        "/parent — ծնողի շաբաթական հաշվետվություն (/parent &lt;երեխայի ID&gt;)",
         "/grade — ընտրել դասարանը, որ բացատրությունները հարմարեցնեմ քեզ",
         "/reset — մաքրել մեր նախորդ զրույցի պատմությունը և սկսել նորից",
         "/about — իմանալ ավելին այս բոտի մասին",
@@ -109,14 +111,20 @@ def cmd_help(message):
     ]
     if HF_SPACE_ID:
         lines.append("/model — փոխել AI մատակարարը")
-    bot.send_message(message.chat.id, "\n".join(lines))
+    bot.send_message(
+        message.chat.id,
+        "<b>Հրամանների ցանկ</b>\n" + "\n".join(lines),
+        parse_mode="HTML",
+    )
 
 
 @bot.message_handler(commands=["reset"], func=is_allowed)
 def cmd_reset(message):
     clear_history(message.from_user.id)
     bot.send_message(
-        message.chat.id, "Մեր նախորդ զրույցը մաքրված է։ Սկսենք նորից 🙂"
+        message.chat.id,
+        "Մեր նախորդ զրույցը մաքրված է։ Սկսենք նորից 🙂",
+        parse_mode="HTML",
     )
 
 
@@ -129,13 +137,13 @@ def cmd_about(message):
         model_line = MODEL
     storage_line = "SQLite" if store is not None else "առանց հիշողության"
     lines = [
-        f"Մոդել: {model_line}",
-        f"Հիշողություն: {storage_line}",
-        f"Հոսթինգ: {HOSTING_LABEL}",
+        f"<b>Մոդել:</b> {html.escape(model_line)}",
+        f"<b>Հիշողություն:</b> {storage_line}",
+        f"<b>Հոսթինգ:</b> {html.escape(HOSTING_LABEL)}",
     ]
     if COMMIT_SHA:
-        lines.append(f"Տարբերակ: {COMMIT_SHA}")
-    bot.send_message(message.chat.id, "\n".join(lines))
+        lines.append(f"<b>Տարբերակ:</b> <code>{html.escape(COMMIT_SHA)}</code>")
+    bot.send_message(message.chat.id, "\n".join(lines), parse_mode="HTML")
 
 
 @bot.message_handler(commands=["stats"], func=is_allowed)
@@ -143,18 +151,23 @@ def cmd_stats(message):
     s = get_stats(message.from_user.id)
     bot.send_message(
         message.chat.id,
-        "📊 Քո վիճակագրությունը:\n"
-        f"📚 Թեմաներ — {s['topics']}\n"
-        f"📝 Կոնսպեկտներ — {s['conspectuses']}\n"
-        f"🧠 Flashcard սեսիաներ — {s['flashcards']}\n"
-        f"✅ Quiz-եր — {s['quizzes']}",
+        "📊 <b>Քո վիճակագրությունը</b>\n"
+        f"📚 Թեմաներ — <b>{s['topics']}</b>\n"
+        f"📝 Կոնսպեկտներ — <b>{s['conspectuses']}</b>\n"
+        f"🧠 Flashcard սեսիաներ — <b>{s['flashcards']}</b>\n"
+        f"✅ Quiz-եր — <b>{s['quizzes']}</b>",
+        parse_mode="HTML",
     )
 
 
 def _award_new_badges(chat_id: int, user_id: int) -> None:
     """Award any newly-earned badges and congratulate the user for each."""
     for badge in check_and_award(user_id):
-        bot.send_message(chat_id, f"🎉 Շնորհավո՛ր։ Դու վաստակեցիր նշան՝ {badge}")
+        bot.send_message(
+            chat_id,
+            f"🎉 Շնորհավո՛ր։ Դու վաստակեցիր նշան՝ <b>{html.escape(str(badge))}</b>",
+            parse_mode="HTML",
+        )
 
 
 @bot.message_handler(commands=["achievements"], func=is_allowed)
@@ -164,11 +177,14 @@ def cmd_achievements(message):
         bot.send_message(
             message.chat.id,
             "🏅 Դու դեռ նշաններ չունես։ Սովորիր, անցիր վիկտորինաներ ու հավաքիր դրանք 🙂",
+            parse_mode="HTML",
         )
         return
     bot.send_message(
         message.chat.id,
-        "🏅 Քո նշանները՝\n" + "\n".join(f"• {b}" for b in badges),
+        "🏅 <b>Քո նշանները</b>\n"
+        + "\n".join(f"• {html.escape(str(b))}" for b in badges),
+        parse_mode="HTML",
     )
 
 
@@ -178,9 +194,10 @@ def cmd_parent(message):
     if len(parts) == 1 or not parts[1].strip():
         bot.send_message(
             message.chat.id,
-            "👨‍👩‍👧 Ծնողի ռեժիմ։ Ուղարկիր՝ /parent <երեխայի ID>\n"
+            "👨‍👩‍👧 <b>Ծնողի ռեժիմ</b>։ Ուղարկիր՝ /parent &lt;երեխայի ID&gt;\n"
             "Օրինակ՝ /parent 123456789\n\n"
             "Երեխայի ID-ն նրա Telegram-ի թվային նույնացուցիչն է։",
+            parse_mode="HTML",
         )
         return
     try:
@@ -189,12 +206,14 @@ def cmd_parent(message):
         bot.send_message(
             message.chat.id,
             "Երեխայի ID-ն պետք է լինի թիվ։ Օրինակ՝ /parent 123456789",
+            parse_mode="HTML",
         )
         return
     if store is None:
         bot.send_message(
             message.chat.id,
             "Ծնողի ռեժիմը հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
+            parse_mode="HTML",
         )
         return
     link_child(message.from_user.id, child_id)
@@ -208,6 +227,7 @@ def cmd_repeat(message):
         bot.send_message(
             message.chat.id,
             "Դեռ կրկնելու թեմա չկա 🙂 Ուղարկիր դասագրքի անունը կամ թեման։",
+            parse_mode="HTML",
         )
         return
     send_reply(
@@ -226,37 +246,44 @@ def cmd_remind(message):
         if current:
             bot.send_message(
                 message.chat.id,
-                f"⏰ Քո օրական հիշեցումը դրված է ժամը {current}-ին։\n"
+                f"⏰ Քո օրական հիշեցումը դրված է ժամը <b>{html.escape(str(current))}</b>-ին։\n"
                 "Անջատելու համար գրիր /remind off։",
+                parse_mode="HTML",
             )
         else:
             bot.send_message(
                 message.chat.id,
                 "Հիշեցում դրված չէ։ Օրինակ՝ /remind 18:00\n"
                 "Ամեն օր այդ ժամին կուղարկեմ քո վերջին կոնսպեկտը 🙂",
+                parse_mode="HTML",
             )
         return
     arg = parts[1].strip().lower()
     if arg in ("off", "անջատել"):
         clear_reminder(user_id)
-        bot.send_message(message.chat.id, "🔕 Հիշեցումն անջատված է։")
+        bot.send_message(
+            message.chat.id, "🔕 Հիշեցումն անջատված է։", parse_mode="HTML"
+        )
         return
     hhmm = normalize_time(arg)
     if not hhmm:
         bot.send_message(
             message.chat.id,
             "Սխալ ձևաչափ։ Գրիր ժամը այսպես՝ /remind 18:00 (24-ժամյա ձևաչափով)։",
+            parse_mode="HTML",
         )
         return
     if not set_reminder(user_id, hhmm):
         bot.send_message(
             message.chat.id,
             "Հիշեցումը հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
+            parse_mode="HTML",
         )
         return
     bot.send_message(
         message.chat.id,
-        f"⏰ Հիշեցումը դրված է ամեն օր ժամը {hhmm}-ին։ Կուղարկեմ քո վերջին կոնսպեկտը 🙂",
+        f"⏰ Հիշեցումը դրված է ամեն օր ժամը <b>{html.escape(str(hhmm))}</b>-ին։ Կուղարկեմ քո վերջին կոնսպեկտը 🙂",
+        parse_mode="HTML",
     )
 
 
@@ -272,6 +299,7 @@ def cmd_stopjoke(message):
     bot.send_message(
         message.chat.id,
         "Կատակները անջատված են։ Կարող ես նորից միացնել /joke հրամանով։",
+        parse_mode="HTML",
     )
 
 
@@ -286,6 +314,7 @@ def cmd_joke(message):
         bot.send_message(
             chat_id,
             "Կատակները անջատված են։ Գրիր /joke նորից միացնելու համար։",
+            parse_mode="HTML",
         )
         return
     steps = (
@@ -300,7 +329,7 @@ def cmd_joke(message):
     for i, prompt in enumerate(steps):
         with keep_typing(chat_id):
             reply = ask_ai(user_id, prompt)
-        bot.send_message(chat_id, reply)
+        bot.send_message(chat_id, reply, parse_mode="HTML")
         _log(message, "out", reply)
         if i < len(steps) - 1:
             time.sleep(1.5)
@@ -309,7 +338,11 @@ def cmd_joke(message):
 @bot.message_handler(commands=["sha"], func=is_allowed)
 def cmd_sha(message):
     sha = COMMIT_SHA or "unknown"
-    bot.send_message(message.chat.id, f"Live SHA: {sha}")
+    bot.send_message(
+        message.chat.id,
+        f"Live SHA: <code>{html.escape(sha)}</code>",
+        parse_mode="HTML",
+    )
 
 
 if HF_SPACE_ID:
@@ -321,21 +354,26 @@ if HF_SPACE_ID:
             current = get_provider(message.from_user.id)
             bot.send_message(
                 message.chat.id,
-                f"Ընթացիկ մատակարարը՝ {current}\n\n"
+                f"Ընթացիկ մատակարարը՝ <b>{html.escape(str(current))}</b>\n\n"
                 "Տարբերակները՝\n"
                 "/model main — Cerebras (արագ, բազմալեզու, հիշողությամբ)\n"
                 "/model hf — ArmGPT (միայն հայերեն, դանդաղ, առանց հիշողության)",
+                parse_mode="HTML",
             )
             return
         choice = parts[1].strip().lower()
         if choice not in ("main", "hf"):
             bot.send_message(
-                message.chat.id, "Սխալ ընտրություն։ Օգտագործիր՝ /model main կամ /model hf"
+                message.chat.id,
+                "Սխալ ընտրություն։ Օգտագործիր՝ /model main կամ /model hf",
+                parse_mode="HTML",
             )
             return
         if not set_provider(message.from_user.id, choice):
             bot.send_message(
-                message.chat.id, "Չստացվեց պահպանել նախընտրությունը։ Փորձիր մի փոքր ուշ։"
+                message.chat.id,
+                "Չստացվեց պահպանել նախընտրությունը։ Փորձիր մի փոքր ուշ։",
+                parse_mode="HTML",
             )
             return
         if choice == "hf":
@@ -345,9 +383,14 @@ if HF_SPACE_ID:
                 "Ուշադրություն՝ սա փոքրիկ մոդել է, որը սովորել է միայն հայերեն տեքստերի վրա։ "
                 "Այն կշարունակի այն, ինչ գրում ես, այլ ոչ թե կպատասխանի հարցերին, "
                 "և չի հասկանում անգլերեն։ Պատասխանները տևում են ~30-60 վայրկյան և հիշողություն չկա։",
+                parse_mode="HTML",
             )
         else:
-            bot.send_message(message.chat.id, "Անցանք հիմնական մատակարարին։")
+            bot.send_message(
+                message.chat.id,
+                "Անցանք հիմնական մատակարարին։",
+                parse_mode="HTML",
+            )
 
 
 # ── Conspectus inline keyboard ──────────────────────────────────────────────
@@ -376,6 +419,7 @@ def _more_detail(chat_id: int, user_id: int, message) -> None:
         bot.send_message(
             chat_id,
             "Չգտա նախորդ կոնսպեկտը 🙂 Ուղարկիր թեման նորից, որ պատրաստեմ։",
+            parse_mode="HTML",
         )
         return
     try:
@@ -383,7 +427,11 @@ def _more_detail(chat_id: int, user_id: int, message) -> None:
             reply = expand_conspectus(user_id, consp["topic"], consp["text"])
     except Exception as e:
         print(f"More-detail generation error: {e}")
-        bot.send_message(chat_id, "Ինչ-որ բան այնպես չգնաց։ Խնդրում եմ՝ փորձիր նորից։")
+        bot.send_message(
+            chat_id,
+            "Ինչ-որ բան այնպես չգնաց։ Խնդրում եմ՝ փորձիր նորից։",
+            parse_mode="HTML",
+        )
         return
     # Cache the expanded version so a follow-up quiz / further expansion
     # builds on the deeper notes, then re-show the keyboard.
@@ -398,6 +446,7 @@ def _prompt_new_topic(chat_id: int) -> None:
     bot.send_message(
         chat_id,
         "Լավ 🙂 Գրիր նոր դասագրքի անունը կամ թեման, և ես կպատրաստեմ նոր կոնսպեկտ։",
+        parse_mode="HTML",
     )
 
 
@@ -409,6 +458,7 @@ def _export_pdf(chat_id: int, user_id: int) -> None:
         bot.send_message(
             chat_id,
             "Դեռ կոնսպեկտ չկա 🙂 Ուղարկիր թեման, որ պատրաստեմ, հետո կտամ PDF-ով։",
+            parse_mode="HTML",
         )
         return
     try:
@@ -416,7 +466,11 @@ def _export_pdf(chat_id: int, user_id: int) -> None:
             pdf_bytes = build_conspectus_pdf(consp["topic"], consp["text"])
     except Exception as e:
         print(f"PDF generation error: {e}")
-        bot.send_message(chat_id, "Չստացվեց պատրաստել PDF-ը։ Խնդրում եմ՝ փորձիր նորից։")
+        bot.send_message(
+            chat_id,
+            "Չստացվեց պատրաստել PDF-ը։ Խնդրում եմ՝ փորձիր նորից։",
+            parse_mode="HTML",
+        )
         return
     document = io.BytesIO(pdf_bytes)
     document.name = "konspekt.pdf"
@@ -458,12 +512,14 @@ def cmd_grade(message):
     current = get_grade(message.from_user.id)
     if current:
         head = (
-            f"Քո ընտրած դասարանն է՝ {current}։\n\n"
+            f"Քո ընտրած դասարանն է՝ <b>{html.escape(str(current))}</b>։\n\n"
             "Ուզում ես փոխե՞լ։ Ընտրիր ստորև 👇"
         )
     else:
         head = "Ընտրիր քո դասարանը, որ բացատրություններն ու վիկտորինաները հարմարեցնեմ քեզ 👇"
-    bot.send_message(message.chat.id, head, reply_markup=_grade_keyboard())
+    bot.send_message(
+        message.chat.id, head, reply_markup=_grade_keyboard(), parse_mode="HTML"
+    )
 
 
 @bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("grade:"))
@@ -476,6 +532,7 @@ def cb_grade(call):
         bot.send_message(
             chat_id,
             "Հանեցի դասարանի սահմանափակումը 🙂 Կբացատրեմ ընդհանուր ոճով։",
+            parse_mode="HTML",
         )
         return
     if call.data.startswith("grade:set:"):
@@ -483,13 +540,15 @@ def cb_grade(call):
         if set_grade(user_id, grade):
             bot.send_message(
                 chat_id,
-                f"Հիանալի 👍 Այսուհետ կբացատրեմ {grade} դասարանի մակարդակով։",
+                f"Հիանալի 👍 Այսուհետ կբացատրեմ <b>{html.escape(grade)}</b> դասարանի մակարդակով։",
+                parse_mode="HTML",
             )
         else:
             bot.send_message(
                 chat_id,
                 "Չստացվեց պահպանել ընտրությունը։ "
                 "Հնարավոր է՝ հիշողությունը միացված չէ 🙂",
+                parse_mode="HTML",
             )
 
 
@@ -500,6 +559,7 @@ def _start_quiz(chat_id: int, user_id: int) -> None:
         bot.send_message(
             chat_id,
             "Վիկտորինան հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
+            parse_mode="HTML",
         )
         return
     consp = get_last_conspectus(user_id)
@@ -508,6 +568,7 @@ def _start_quiz(chat_id: int, user_id: int) -> None:
             chat_id,
             "Նախ ուղարկիր դասագրքի անունը կամ թեման, որ պատրաստեմ կոնսպեկտ, "
             "հետո կարող ենք վիկտորինա անել 🙂",
+            parse_mode="HTML",
         )
         return
     try:
@@ -518,11 +579,13 @@ def _start_quiz(chat_id: int, user_id: int) -> None:
         questions = []
     if not questions:
         bot.send_message(
-            chat_id, "Չստացվեց պատրաստել վիկտորինան։ Փորձիր նորից մի փոքր ուշ։"
+            chat_id,
+            "Չստացվեց պատրաստել վիկտորինան։ Փորձիր նորից մի փոքր ուշ։",
+            parse_mode="HTML",
         )
         return
     save_quiz(user_id, questions)
-    bot.send_message(chat_id, "Եկ ստուգենք, թե ինչ հիշեցիր 📝")
+    bot.send_message(chat_id, "Եկ ստուգենք, թե ինչ հիշեցիր 📝", parse_mode="HTML")
     _send_quiz_question(chat_id, user_id)
 
 
@@ -542,8 +605,9 @@ def _send_quiz_question(chat_id: int, user_id: int) -> None:
         kb.add(types.InlineKeyboardButton(opt, callback_data=f"quizans:{idx}:{opt_i}"))
     bot.send_message(
         chat_id,
-        f"❓ Հարց {idx + 1}/{len(questions)}\n\n{q['q']}",
+        f"❓ <b>Հարց {idx + 1}/{len(questions)}</b>\n\n{html.escape(q['q'])}",
         reply_markup=kb,
+        parse_mode="HTML",
     )
 
 
@@ -566,12 +630,17 @@ def _handle_quiz_answer(chat_id: int, user_id: int, data: str) -> None:
     explanation = q.get("explanation", "")
     if opt == correct:
         state["score"] += 1
-        bot.send_message(chat_id, f"✅ Ճիշտ է։ {explanation}".rstrip())
+        bot.send_message(
+            chat_id,
+            f"✅ <b>Ճիշտ է։</b> {html.escape(explanation)}".rstrip(),
+            parse_mode="HTML",
+        )
     else:
         correct_text = q["options"][correct]
         bot.send_message(
             chat_id,
-            f"❌ Ճիշտ պատասխանն է՝ «{correct_text}»։ {explanation}".rstrip(),
+            f"❌ Ճիշտ պատասխանն է՝ «<b>{html.escape(correct_text)}</b>»։ {html.escape(explanation)}".rstrip(),
+            parse_mode="HTML",
         )
     state["idx"] += 1
     update_quiz(user_id, state)
@@ -586,7 +655,8 @@ def _finish_quiz(chat_id: int, user_id: int, state: dict) -> None:
     record_activity(user_id)
     bot.send_message(
         chat_id,
-        f"🎉 Վերջ։ Դու հավաքեցիր {score}/{total} միավոր։ Լավ աշխատանք էր 👏",
+        f"🎉 <b>Վերջ։</b> Դու հավաքեցիր <b>{score}/{total}</b> միավոր։ Լավ աշխատանք էր 👏",
+        parse_mode="HTML",
     )
     _award_new_badges(chat_id, user_id)
 
@@ -631,6 +701,7 @@ def _start_flashcards(chat_id: int, user_id: int) -> None:
             chat_id,
             "Նախ ուղարկիր դասագրքի անունը կամ թեման, որ պատրաստեմ կոնսպեկտ, "
             "հետո կսարքեմ flashcard-ներ 🙂",
+            parse_mode="HTML",
         )
         return
     try:
@@ -641,12 +712,18 @@ def _start_flashcards(chat_id: int, user_id: int) -> None:
         cards = []
     if not cards:
         bot.send_message(
-            chat_id, "Չստացվեց պատրաստել flashcard-ները։ Փորձիր նորից մի փոքր ուշ։"
+            chat_id,
+            "Չստացվեց պատրաստել flashcard-ները։ Փորձիր նորից մի փոքր ուշ։",
+            parse_mode="HTML",
         )
         return
-    bot.send_message(chat_id, "🧠 Ահա քո flashcard-ները՝")
+    bot.send_message(chat_id, "🧠 <b>Ահա քո flashcard-ները՝</b>", parse_mode="HTML")
     for i, card in enumerate(cards):
-        bot.send_message(chat_id, f"❓ {card['q']}\n✅ {card['a']}")
+        bot.send_message(
+            chat_id,
+            f"❓ <b>{html.escape(card['q'])}</b>\n✅ {html.escape(card['a'])}",
+            parse_mode="HTML",
+        )
         if i < len(cards) - 1:
             time.sleep(1)
     incr_flashcards(user_id)
@@ -673,6 +750,7 @@ def _send_mindmap(chat_id: int, user_id: int) -> None:
             chat_id,
             "Նախ ուղարկիր դասագրքի անունը կամ թեման, որ պատրաստեմ կոնսպեկտ, "
             "հետո կսարքեմ mind map 🙂",
+            parse_mode="HTML",
         )
         return
     try:
@@ -683,9 +761,13 @@ def _send_mindmap(chat_id: int, user_id: int) -> None:
         mindmap = ""
     if not (mindmap and mindmap.strip()):
         bot.send_message(
-            chat_id, "Չստացվեց պատրաստել mind map-ը։ Փորձիր նորից մի փոքր ուշ։"
+            chat_id,
+            "Չստացվեց պատրաստել mind map-ը։ Փորձիր նորից մի փոքր ուշ։",
+            parse_mode="HTML",
         )
         return
+    # Sent as plain text (no parse_mode) so the tree connectors and
+    # indentation render exactly as generated instead of being reflowed.
     bot.send_message(chat_id, mindmap)
 
 
@@ -704,6 +786,7 @@ def _send_story(chat_id: int, user_id: int, message) -> None:
             chat_id,
             "Նախ ուղարկիր դասագրքի անունը կամ թեման, որ պատրաստեմ կոնսպեկտ, "
             "հետո կպատմեմ այն որպես պատմություն 📖",
+            parse_mode="HTML",
         )
         return
     try:
@@ -714,7 +797,9 @@ def _send_story(chat_id: int, user_id: int, message) -> None:
         story = ""
     if not (story and story.strip()):
         bot.send_message(
-            chat_id, "Չստացվեց պատրաստել պատմությունը։ Փորձիր նորից մի փոքր ուշ։"
+            chat_id,
+            "Չստացվեց պատրաստել պատմությունը։ Փորձիր նորից մի փոքր ուշ։",
+            parse_mode="HTML",
         )
         return
     send_reply(message, f"📖 {story}")
@@ -735,6 +820,7 @@ def _send_why_matters(chat_id: int, user_id: int, message) -> None:
             chat_id,
             "Նախ ուղարկիր դասագրքի անունը կամ թեման, որ պատրաստեմ կոնսպեկտ, "
             "հետո կբացատրեմ՝ ինչու է դա կարևոր 🌍",
+            parse_mode="HTML",
         )
         return
     try:
@@ -745,10 +831,12 @@ def _send_why_matters(chat_id: int, user_id: int, message) -> None:
         why = ""
     if not (why and why.strip()):
         bot.send_message(
-            chat_id, "Չստացվեց պատրաստել բացատրությունը։ Փորձիր նորից մի փոքր ուշ։"
+            chat_id,
+            "Չստացվեց պատրաստել բացատրությունը։ Փորձիր նորից մի փոքր ուշ։",
+            parse_mode="HTML",
         )
         return
-    send_reply(message, f"🌍 Ինչու է սա կարևոր՝\n\n{why}")
+    send_reply(message, f"🌍 <b>Ինչու է սա կարևոր՝</b>\n\n{why}")
 
 
 @bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("why:"))
@@ -769,7 +857,7 @@ def handle_message(message):
     _log(message, "in", text)
     if is_rate_limited(message.from_user.id):
         limit_msg = f"Դու հասել ես օրական {RATE_LIMIT} հաղորդագրության սահմանին։ Փորձիր նորից վաղը 🙂"
-        bot.send_message(message.chat.id, limit_msg)
+        bot.send_message(message.chat.id, limit_msg, parse_mode="HTML")
         _log(message, "out", f"[rate limited] {limit_msg}")
         return
     try:
@@ -790,7 +878,11 @@ def handle_message(message):
         _log(message, "out", reply)
     except Exception as e:
         print(f"Error in handle_message: {e}")
-        bot.send_message(message.chat.id, "Ինչ-որ բան այնպես չգնաց։ Խնդրում եմ՝ փորձիր նորից։")
+        bot.send_message(
+            message.chat.id,
+            "Ինչ-որ բան այնպես չգնաց։ Խնդրում եմ՝ փորձիր նորից։",
+            parse_mode="HTML",
+        )
         _log(message, "out", f"[error] {e}")
 
 
@@ -805,7 +897,9 @@ def handle_voice(message):
 
     if not whisper_enabled():
         bot.send_message(
-            chat_id, "Ձայնային հաղորդագրությունների ճանաչումը միացված չէ այս բոտում 🙂"
+            chat_id,
+            "Ձայնային հաղորդագրությունների ճանաչումը միացված չէ այս բոտում 🙂",
+            parse_mode="HTML",
         )
         return
 
@@ -816,7 +910,9 @@ def handle_voice(message):
     except Exception as e:
         print(f"Voice download error: {e}")
         bot.send_message(
-            chat_id, "Չստացվեց ներբեռնել ձայնային հաղորդագրությունը։ Փորձիր նորից 🙂"
+            chat_id,
+            "Չստացվեց ներբեռնել ձայնային հաղորդագրությունը։ Փորձիր նորից 🙂",
+            parse_mode="HTML",
         )
         return
 
@@ -825,22 +921,28 @@ def handle_voice(message):
         transcript = transcribe(audio_bytes)
     if not transcript:
         bot.send_message(
-            chat_id, "Ներողություն, չկարողացա հասկանալ ձայնագրությունը։ Փորձիր նորից 🙂"
+            chat_id,
+            "Ներողություն, չկարողացա հասկանալ ձայնագրությունը։ Փորձիր նորից 🙂",
+            parse_mode="HTML",
         )
         return
     _log(message, "in", f"[voice] {transcript}")
 
     if is_rate_limited(user_id):
         limit_msg = f"Դու հասել ես օրական {RATE_LIMIT} հաղորդագրության սահմանին։ Փորձիր նորից վաղը 🙂"
-        bot.send_message(chat_id, limit_msg)
+        bot.send_message(chat_id, limit_msg, parse_mode="HTML")
         _log(message, "out", f"[rate limited] {limit_msg}")
         return
 
     try:
         with keep_typing(chat_id):
             reply = ask_ai(user_id, transcript)
-        # Plain-text reply with the transcription confirmation appended.
-        full_reply = f"{reply}\n\n🎤 Դու ասացիր՝ «{transcript}»"
+        # Reply (already HTML-formatted by the model) plus the transcription
+        # confirmation. The transcript is user speech, so escape it — a stray
+        # < or & would otherwise break HTML parsing of the whole message.
+        full_reply = (
+            f"{reply}\n\n🎤 <i>Դու ասացիր՝ «{html.escape(transcript)}»</i>"
+        )
         # Same as handle_message: only the main provider yields a conspectus
         # worth caching / quizzing / showing the inline keyboard for.
         if get_provider(user_id) == "main":
@@ -855,5 +957,9 @@ def handle_voice(message):
         _log(message, "out", reply)
     except Exception as e:
         print(f"Error in handle_voice: {e}")
-        bot.send_message(chat_id, "Ինչ-որ բան այնպես չգնաց։ Խնդրում եմ՝ փորձիր նորից։")
+        bot.send_message(
+            chat_id,
+            "Ինչ-որ բան այնպես չգնաց։ Խնդրում եմ՝ փորձիր նորից։",
+            parse_mode="HTML",
+        )
         _log(message, "out", f"[error] {e}")

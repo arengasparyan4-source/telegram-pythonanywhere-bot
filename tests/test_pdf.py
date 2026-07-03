@@ -24,6 +24,16 @@ def test_build_conspectus_pdf_handles_empty_topic():
     assert data[:5] == b"%PDF-"
 
 
+def test_build_conspectus_pdf_strips_html_tags():
+    """Conspectuses now carry Telegram-HTML tags; the PDF must render clean
+    prose, not literal <b>/<i>/&lt; markup."""
+    from bot.pdf import _strip_html
+
+    assert _strip_html("<b>Սահմանում</b>") == "Սահմանում"
+    assert _strip_html("5 &lt; 10 &amp; 3 &gt; 1") == "5 < 10 & 3 > 1"
+    assert _strip_html("• <i>key</i>: <code>H2O</code>") == "• key: H2O"
+
+
 # ── handlers: /pdf + callback ───────────────────────────────────────────────
 
 

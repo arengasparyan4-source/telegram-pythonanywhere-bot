@@ -9,6 +9,8 @@ without installing system fonts. fpdf2 is pure-Python (no system libs),
 so it's safe on the PA free tier.
 """
 
+import html
+import re
 from pathlib import Path
 
 from fpdf import FPDF
@@ -16,9 +18,24 @@ from fpdf import FPDF
 _FONT_PATH = Path(__file__).resolve().parent / "assets" / "NotoSansArmenian.ttf"
 _FONT_FAMILY = "Noto"
 
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_html(text: str) -> str:
+    """Turn Telegram-HTML conspectus text into plain text for the PDF.
+
+    Conspectuses are now formatted with <b>/<i>/<code> tags (the bot sends
+    them with parse_mode=HTML), but fpdf2 renders text literally — the raw
+    tags would show up in the document. Drop the tags and unescape any
+    &lt;/&gt;/&amp; entities so the PDF reads as clean prose.
+    """
+    return html.unescape(_HTML_TAG_RE.sub("", text))
+
 
 def build_conspectus_pdf(topic: str, text: str) -> bytes:
     """Return PDF bytes for a conspectus titled ``topic`` with body ``text``."""
+    topic = _strip_html(topic)
+    text = _strip_html(text)
     pdf = FPDF(format="A4")
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()

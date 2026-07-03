@@ -156,7 +156,7 @@ def test_cmd_about_includes_commit_sha_when_set():
 
         cmd_about(make_message())
         sent = mock_bot.send_message.call_args[0][1]
-        assert "Տարբերակ: abc1234" in sent
+        assert "<b>Տարբերակ:</b> <code>abc1234</code>" in sent
 
 
 def test_cmd_about_omits_version_line_when_sha_unknown():
@@ -202,7 +202,9 @@ def test_cmd_sha_reports_live_commit_sha():
         from bot.handlers import cmd_sha
 
         cmd_sha(make_message())
-        mock_bot.send_message.assert_called_once_with(456, "Live SHA: abc1234")
+        mock_bot.send_message.assert_called_once_with(
+            456, "Live SHA: <code>abc1234</code>", parse_mode="HTML"
+        )
 
 
 def test_cmd_sha_reports_unknown_when_git_sha_unavailable():
@@ -213,7 +215,9 @@ def test_cmd_sha_reports_unknown_when_git_sha_unavailable():
         from bot.handlers import cmd_sha
 
         cmd_sha(make_message())
-        mock_bot.send_message.assert_called_once_with(456, "Live SHA: unknown")
+        mock_bot.send_message.assert_called_once_with(
+            456, "Live SHA: <code>unknown</code>", parse_mode="HTML"
+        )
 
 
 # ── /model command ────────────────────────────────────────────────────────────
@@ -247,7 +251,7 @@ def test_cmd_model_no_args_shows_current():
         msg = make_message(text="/model")
         cmd_model(msg)
         sent = mock_bot.send_message.call_args[0][1]
-        assert "Ընթացիկ մատակարարը՝ main" in sent
+        assert "Ընթացիկ մատակարարը՝ <b>main</b>" in sent
         assert "/model main" in sent
         assert "/model hf" in sent
 

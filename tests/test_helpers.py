@@ -22,7 +22,7 @@ def test_send_reply_short_text():
         msg = make_message()
         send_reply(msg, "Hello!")
         mock_bot.send_message.assert_called_once_with(
-            msg.chat.id, "Hello!", parse_mode="Markdown", reply_markup=None
+            msg.chat.id, "Hello!", parse_mode="HTML", reply_markup=None
         )
 
 
@@ -36,19 +36,19 @@ def test_send_reply_splits_long_text():
             assert mock_bot.send_message.call_count == 3
 
 
-def test_send_reply_falls_back_to_plain_text_on_markdown_failure():
-    """If Markdown parse fails (unbalanced **/[), retry the same chunk as plain text."""
+def test_send_reply_falls_back_to_plain_text_on_html_failure():
+    """If HTML parse fails (unbalanced/stray tag), retry the same chunk as plain text."""
     with patch("bot.helpers.bot") as mock_bot:
-        # First call (Markdown) fails; second call (plain) succeeds.
+        # First call (HTML) fails; second call (plain) succeeds.
         mock_bot.send_message.side_effect = [Exception("can't parse entities"), None]
         from bot.helpers import send_reply
 
         msg = make_message()
-        send_reply(msg, "an unbalanced * marker")
+        send_reply(msg, "an unbalanced <b marker")
         assert mock_bot.send_message.call_count == 2
         first_kwargs = mock_bot.send_message.call_args_list[0][1]
         second_kwargs = mock_bot.send_message.call_args_list[1][1]
-        assert first_kwargs.get("parse_mode") == "Markdown"
+        assert first_kwargs.get("parse_mode") == "HTML"
         # Retry has no parse_mode
         assert "parse_mode" not in second_kwargs
 

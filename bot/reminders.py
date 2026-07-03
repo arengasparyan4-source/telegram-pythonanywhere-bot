@@ -119,7 +119,11 @@ def run_due_reminders(now_hhmm: str, today_iso: str) -> int:
             consp = get_last_conspectus(int(uid_str))
             if not consp:
                 continue
-            bot.send_message(int(uid_str), f"{REPEAT_HEADER}\n\n{consp['text']}")
+            bot.send_message(
+                int(uid_str),
+                f"{REPEAT_HEADER}\n\n{consp['text']}",
+                parse_mode="HTML",
+            )
             store.set(f"remind:sent:{uid_str}", today_iso)
             sent += 1
         except Exception as e:

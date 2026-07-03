@@ -80,11 +80,12 @@ def test_cmd_stats_formats_armenian_summary():
 
         cmd_stats(_msg())
         sent = mock_bot.send_message.call_args[0][1]
-        assert "📊 Քո վիճակագրությունը:" in sent
-        assert "📚 Թեմաներ — 12" in sent
-        assert "📝 Կոնսպեկտներ — 8" in sent
-        assert "🧠 Flashcard սեսիաներ — 5" in sent
-        assert "✅ Quiz-եր — 3" in sent
+        assert "📊 <b>Քո վիճակագրությունը</b>" in sent
+        assert "📚 Թեմաներ — <b>12</b>" in sent
+        assert "📝 Կոնսպեկտներ — <b>8</b>" in sent
+        assert "🧠 Flashcard սեսիաներ — <b>5</b>" in sent
+        assert "✅ Quiz-եր — <b>3</b>" in sent
+        assert mock_bot.send_message.call_args.kwargs.get("parse_mode") == "HTML"
 
 
 def test_finish_quiz_increments_quiz_counter():

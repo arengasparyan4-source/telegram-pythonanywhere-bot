@@ -109,7 +109,7 @@ def test_start_flashcards_sends_each_card_formatted():
         assert any("flashcard" in t.lower() for t in texts)
         card_msgs = [t for t in texts if t.startswith("❓")]
         assert len(card_msgs) == 2
-        assert "❓ Հարց 1\n✅ Պատասխան 1" in card_msgs
+        assert "❓ <b>Հարց 1</b>\n✅ Պատասխան 1" in card_msgs
 
 
 def test_cb_flashcards_routes():

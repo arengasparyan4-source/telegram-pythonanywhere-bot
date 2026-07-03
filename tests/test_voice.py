@@ -98,7 +98,7 @@ def test_handle_voice_transcribes_and_replies_with_text():
     text = mock_send_reply.call_args.args[1]
     # Reply carries the AI answer plus the Armenian transcript confirmation.
     assert "Ֆոտոսինթեզը գործընթաց է" in text
-    assert "🎤 Դու ասացիր՝ «ինչ է ֆոտոսինթեզը»" in text
+    assert "🎤 <i>Դու ասացիր՝ «ինչ է ֆոտոսինթեզը»</i>" in text
 
 
 def test_handle_voice_disabled_sends_notice():
@@ -157,4 +157,4 @@ def test_handle_voice_hf_provider_replies_text_without_keyboard():
     mock_send_reply.assert_called_once()
     assert mock_send_reply.call_args.kwargs.get("reply_markup") is None
     text = mock_send_reply.call_args.args[1]
-    assert "պատասխան" in text and "🎤 Դու ասացիր՝ «հարց»" in text
+    assert "պատասխան" in text and "🎤 <i>Դու ասացիր՝ «հարց»</i>" in text
