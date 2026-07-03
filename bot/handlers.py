@@ -24,6 +24,7 @@ from bot.ai import (
     generate_homework,
     generate_mindmap,
     generate_challenge,
+    generate_exam,
     generate_quiz,
     generate_story,
     generate_study_plan,
@@ -1495,6 +1496,43 @@ def cb_ask(call):
         )
 
 
+# ── Exam prep (Feature 1 / smart-learning) ───────────────────────────────────
+@bot.message_handler(commands=["exam"], func=is_allowed)
+def cmd_exam(message):
+    if not set_mode(message.from_user.id, "exam"):
+        bot.send_message(
+            message.chat.id,
+            "Քննության պատրաստությունը հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
+            parse_mode="HTML",
+        )
+        return
+    bot.send_message(
+        message.chat.id,
+        "🎓 <b>Քննության պատրաստություն</b>\n\n"
+        "Գրիր թեման կամ առարկան, և ես կպատրաստեմ ամբողջական կրկնության դաս՝ "
+        "հիմնական կետեր, 10 վարժանք և պատրաստության ստուգում 🙂",
+        parse_mode="HTML",
+    )
+
+
+def _make_exam(message, topic: str) -> None:
+    """Generate and send a full exam-prep session for the given topic."""
+    try:
+        with keep_typing(message.chat.id):
+            exam = generate_exam(message.from_user.id, topic)
+    except Exception as e:
+        print(f"Exam generation error: {e}")
+        exam = ""
+    if not (exam and exam.strip()):
+        bot.send_message(
+            message.chat.id,
+            "Չստացվեց պատրաստել դասը։ Փորձիր նորից մի փոքր ուշ։",
+            parse_mode="HTML",
+        )
+        return
+    send_reply(message, f"🎓 <b>{html.escape(topic)}</b>\n\n{exam}")
+
+
 # ── Study plan (Feature 3) ───────────────────────────────────────────────────
 @bot.message_handler(commands=["plan"], func=is_allowed)
 def cmd_plan(message):
@@ -1545,6 +1583,10 @@ def _route_pending_mode(message, text: str, mode: dict) -> bool:
         return True
     if name == "ask":
         _handle_ask(message, text)
+        return True
+    if name == "exam":
+        clear_mode(message.from_user.id)
+        _make_exam(message, text)
         return True
     if name == "plan":
         clear_mode(message.from_user.id)
