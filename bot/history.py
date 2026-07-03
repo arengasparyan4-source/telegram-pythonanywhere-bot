@@ -274,6 +274,228 @@ def is_admin(user_id: int) -> bool:
         return False
 
 
+# ── Group class mode (Feature 4) ─────────────────────────────────────────────
+# A class question + collected answers, keyed by the GROUP chat_id (not a
+# user_id), under class:{chat_id}. The teacher posts a question with
+# /askclass; students' replies are collected (one answer per student, latest
+# wins). Expires after a day so an abandoned question clears itself.
+_CLASS_TTL = 86400  # an active class question lives for 1 day (seconds)
+_CLASS_MAX_ANSWERS = 200
+
+
+def set_group_question(chat_id: int, question: str, asker_id: int) -> bool:
+    """Start a new class question in a group, clearing any previous answers."""
+    if store is None:
+        return False
+    try:
+        store.set(
+            f"class:{chat_id}",
+            json.dumps({"question": question, "asker": asker_id, "answers": []}),
+            ex=_CLASS_TTL,
+        )
+        return True
+    except Exception as e:
+        print(f"Store write error (class question): {e}")
+        return False
+
+
+def get_group_question(chat_id: int) -> dict | None:
+    """Return the group's active class question dict, or None."""
+    if store is None:
+        return None
+    try:
+        data = store.get(f"class:{chat_id}")
+        return json.loads(data) if data else None
+    except Exception as e:
+        print(f"Store read error (class question): {e}")
+        return None
+
+
+def add_class_answer(chat_id: int, user_id: int, name: str, text: str) -> bool:
+    """Record a student's answer to the active class question (one per student).
+
+    Returns True if stored, False if there's no active question. A repeat
+    answer from the same student replaces their earlier one.
+    """
+    data = get_group_question(chat_id)
+    if not data or store is None:
+        return False
+    try:
+        answers = [a for a in data.get("answers", []) if a.get("uid") != user_id]
+        answers.append({"uid": user_id, "name": name, "text": text})
+        data["answers"] = answers[-_CLASS_MAX_ANSWERS:]
+        store.set(f"class:{chat_id}", json.dumps(data), ex=_CLASS_TTL)
+        return True
+    except Exception as e:
+        print(f"Store write error (class answer): {e}")
+        return False
+
+
+def clear_group_question(chat_id: int) -> None:
+    """End the active class question in a group."""
+    if store is None:
+        return
+    try:
+        store.delete(f"class:{chat_id}")
+    except Exception as e:
+        print(f"Store delete error (class question): {e}")
+
+
+# ── Leaderboard (Feature 5) ──────────────────────────────────────────────────
+# Per-chat scoreboard under score:{chat_id} as JSON {uid: {"name", "points"}}.
+# Scoped by chat_id so a class group has its own board (and a private chat has
+# a personal one). Points come from correct quiz/game answers and duel wins.
+def _load_scores(chat_id: int) -> dict:
+    if store is None:
+        return {}
+    try:
+        data = store.get(f"score:{chat_id}")
+        return json.loads(data) if data else {}
+    except Exception as e:
+        print(f"Store read error (scores): {e}")
+        return {}
+
+
+def add_score(chat_id: int, user_id: int, name: str, points: int = 1) -> None:
+    """Add ``points`` to a user's score within a chat's leaderboard."""
+    if store is None or points <= 0:
+        return
+    try:
+        board = _load_scores(chat_id)
+        entry = board.get(str(user_id)) or {"name": name, "points": 0}
+        entry["points"] = int(entry.get("points", 0)) + points
+        if name:
+            entry["name"] = name
+        board[str(user_id)] = entry
+        store.set(f"score:{chat_id}", json.dumps(board))
+    except Exception as e:
+        print(f"Store write error (add_score): {e}")
+
+
+def get_leaderboard(chat_id: int) -> list:
+    """Return [(name, points), ...] for a chat, ranked highest first."""
+    board = _load_scores(chat_id)
+    ranked = [
+        (v.get("name") or f"user{uid}", int(v.get("points", 0)))
+        for uid, v in board.items()
+    ]
+    ranked.sort(key=lambda t: t[1], reverse=True)
+    return ranked
+
+
+# ── Duel (Feature 6) ─────────────────────────────────────────────────────────
+# A 2-player quiz duel, one active per chat, keyed by the chat_id under
+# duel:{chat_id}. The handler layer owns the game logic (rounds, scoring,
+# timing); this module just persists the state blob with a TTL so an
+# abandoned duel (a player who drops out / never joins) clears itself.
+_DUEL_TTL = 3600  # an in-progress duel expires after 1 hour (seconds)
+
+
+def save_duel(chat_id: int, state: dict) -> bool:
+    """Persist a duel's state for a chat. Returns True on success."""
+    if store is None:
+        return False
+    try:
+        store.set(f"duel:{chat_id}", json.dumps(state), ex=_DUEL_TTL)
+        return True
+    except Exception as e:
+        print(f"Store write error (duel): {e}")
+        return False
+
+
+def get_duel(chat_id: int) -> dict | None:
+    """Return the chat's active duel state, or None."""
+    if store is None:
+        return None
+    try:
+        data = store.get(f"duel:{chat_id}")
+        return json.loads(data) if data else None
+    except Exception as e:
+        print(f"Store read error (duel): {e}")
+        return None
+
+
+def clear_duel(chat_id: int) -> None:
+    """End the chat's duel."""
+    if store is None:
+        return
+    try:
+        store.delete(f"duel:{chat_id}")
+    except Exception as e:
+        print(f"Store delete error (duel): {e}")
+
+
+# ── Spaced repetition (Feature 7) ────────────────────────────────────────────
+# Per-user review schedule under review:{user_id} as JSON
+# {topic: {"studied": epoch, "stage": int}}. A topic becomes "due" after 1,
+# then 3, then 7 days; each review advances the stage. Studying a topic afresh
+# resets it to stage 0.
+_REVIEW_INTERVALS_DAYS = (1, 3, 7)
+_REVIEW_MAX = 50
+
+
+def _load_reviews(user_id: int) -> dict:
+    if store is None:
+        return {}
+    try:
+        data = store.get(f"review:{user_id}")
+        return json.loads(data) if data else {}
+    except Exception as e:
+        print(f"Store read error (reviews): {e}")
+        return {}
+
+
+def record_study(user_id: int, topic: str, now: int | None = None) -> None:
+    """Record that a topic was studied now, (re)starting its review schedule."""
+    topic = (topic or "").strip()
+    if not topic or store is None:
+        return
+    ts = int(now if now is not None else time.time())
+    try:
+        data = _load_reviews(user_id)
+        data[topic] = {"studied": ts, "stage": 0}
+        if len(data) > _REVIEW_MAX:
+            data = dict(
+                sorted(data.items(), key=lambda kv: kv[1]["studied"], reverse=True)[
+                    :_REVIEW_MAX
+                ]
+            )
+        store.set(f"review:{user_id}", json.dumps(data))
+    except Exception as e:
+        print(f"Store write error (record_study): {e}")
+
+
+def get_due_reviews(user_id: int, now: int | None = None) -> list:
+    """Return topics whose spaced-repetition review is due now (most overdue
+    first)."""
+    now = int(now if now is not None else time.time())
+    due = []
+    for topic, info in _load_reviews(user_id).items():
+        stage = info.get("stage", 0)
+        if stage >= len(_REVIEW_INTERVALS_DAYS):
+            continue  # fully reviewed — graduated
+        due_at = info.get("studied", 0) + _REVIEW_INTERVALS_DAYS[stage] * 86400
+        if now >= due_at:
+            due.append((topic, due_at))
+    due.sort(key=lambda t: t[1])
+    return [topic for topic, _ in due]
+
+
+def mark_reviewed(user_id: int, topic: str, now: int | None = None) -> None:
+    """Advance a topic to its next review stage after a successful review."""
+    if store is None:
+        return
+    ts = int(now if now is not None else time.time())
+    try:
+        data = _load_reviews(user_id)
+        if topic in data:
+            data[topic]["stage"] = data[topic].get("stage", 0) + 1
+            data[topic]["studied"] = ts
+            store.set(f"review:{user_id}", json.dumps(data))
+    except Exception as e:
+        print(f"Store write error (mark_reviewed): {e}")
+
+
 def get_history(user_id: int) -> list:
     if store is None:
         return []

@@ -18,6 +18,7 @@ from bot.config import (
 from bot.ai import (
     answer_question,
     ask_ai,
+    define_word,
     expand_conspectus,
     explain_simply,
     generate_flashcards,
@@ -26,6 +27,7 @@ from bot.ai import (
     generate_challenge,
     generate_exam,
     generate_quiz,
+    generate_quiz_hint,
     generate_story,
     generate_study_plan,
     generate_truefalse,
@@ -44,14 +46,26 @@ from bot.games import clear_game, get_game, save_game, update_game
 from bot.grade import clear_grade, get_grade, set_grade
 from bot.helpers import is_allowed, keep_typing, send_reply, should_respond
 from bot.history import (
+    add_class_answer,
     add_favorite,
+    add_score,
+    clear_duel,
+    clear_group_question,
     clear_history,
     get_admin_stats,
+    get_duel,
     get_favorites,
+    get_group_question,
+    get_leaderboard,
     incr_messages,
+    save_duel,
     is_admin,
+    get_due_reviews,
     list_weakspots,
+    mark_reviewed,
+    record_study,
     record_weak_answer,
+    set_group_question,
     set_language,
     start_admin_session,
     touch_user,
@@ -816,6 +830,406 @@ def _handle_admin_login(message, text: str) -> None:
         )
 
 
+# ── Group / class mode (Feature 4) ───────────────────────────────────────────
+# The bot works in class group chats. To read students' answers, replies to
+# the bot's question are always delivered by Telegram; to also read plain
+# (non-reply) messages, group privacy mode must be DISABLED in BotFather:
+#   BotFather → /setprivacy → <this bot> → Disable
+# In groups the bot stays quiet unless it's a command, a reply to the bot, an
+# @mention, or an answer to an active /askclass question — so it never spams.
+def _is_group(message) -> bool:
+    return getattr(message.chat, "type", "") in ("group", "supergroup")
+
+
+def _display_name(user) -> str:
+    return (
+        getattr(user, "first_name", None)
+        or getattr(user, "username", None)
+        or f"user{getattr(user, 'id', '')}"
+    )
+
+
+def _mentions_bot(message) -> bool:
+    return f"@{BOT_INFO.username}" in (message.text or "")
+
+
+def _is_reply_to_bot(message) -> bool:
+    reply = getattr(message, "reply_to_message", None)
+    return bool(
+        reply
+        and getattr(reply, "from_user", None)
+        and reply.from_user.id == BOT_INFO.id
+    )
+
+
+def _is_group_admin(chat_id: int, user_id: int) -> bool:
+    """True if the user is the group's creator or an administrator.
+
+    Best-effort: on any API error (e.g. the bot can't query members) we
+    fail closed and treat the user as a non-admin.
+    """
+    try:
+        member = bot.get_chat_member(chat_id, user_id)
+        return getattr(member, "status", "") in ("creator", "administrator")
+    except Exception as e:
+        print(f"get_chat_member error: {e}")
+        return False
+
+
+@bot.message_handler(commands=["askclass"], func=is_allowed)
+def cmd_askclass(message):
+    if not _is_group(message):
+        bot.send_message(
+            message.chat.id,
+            "Այս հրամանն աշխատում է միայն խմբային զրույցում 👥",
+            parse_mode="HTML",
+        )
+        return
+    if not _is_group_admin(message.chat.id, message.from_user.id):
+        bot.send_message(
+            message.chat.id,
+            "Միայն ուսուցիչը (խմբի ադմինը) կարող է հարց տալ դասարանին 🙂",
+            parse_mode="HTML",
+        )
+        return
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        bot.send_message(
+            message.chat.id,
+            "Գրիր հարցը՝ <code>/askclass հարցը</code>",
+            parse_mode="HTML",
+        )
+        return
+    question = parts[1].strip()
+    if not set_group_question(message.chat.id, question, message.from_user.id):
+        bot.send_message(
+            message.chat.id,
+            "Խմբային ռեժիմը հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
+            parse_mode="HTML",
+        )
+        return
+    bot.send_message(
+        message.chat.id,
+        f"👥 <b>Հարց դասարանին</b>\n\n{html.escape(question)}\n\n"
+        "Պատասխանելու համար <b>պատասխանի՛ր (reply)</b> այս հաղորդագրությանը 🙂",
+        parse_mode="HTML",
+    )
+
+
+@bot.message_handler(commands=["answers"], func=is_allowed)
+def cmd_answers(message):
+    if not _is_group(message):
+        bot.send_message(
+            message.chat.id,
+            "Այս հրամանն աշխատում է միայն խմբային զրույցում 👥",
+            parse_mode="HTML",
+        )
+        return
+    if not _is_group_admin(message.chat.id, message.from_user.id):
+        bot.send_message(
+            message.chat.id,
+            "Միայն ուսուցիչը կարող է տեսնել պատասխանները 🙂",
+            parse_mode="HTML",
+        )
+        return
+    data = get_group_question(message.chat.id)
+    if not data:
+        bot.send_message(
+            message.chat.id, "Ակտիվ հարց չկա 🙂", parse_mode="HTML"
+        )
+        return
+    answers = data.get("answers", [])
+    lines = [f"👥 <b>Հարց.</b> {html.escape(data['question'])}", ""]
+    if not answers:
+        lines.append("Դեռ պատասխաններ չկան։")
+    else:
+        lines.append(f"📥 <b>Ստացված պատասխաններ ({len(answers)})</b>՝")
+        lines += [
+            f"• <b>{html.escape(str(a['name']))}</b>՝ {html.escape(str(a['text']))}"
+            for a in answers
+        ]
+    clear_group_question(message.chat.id)
+    bot.send_message(message.chat.id, "\n".join(lines), parse_mode="HTML")
+
+
+def _handle_group_message(message, text: str) -> bool:
+    """Handle a non-command text message in a group.
+
+    Returns True if consumed (answer collected, or ignored to avoid spam),
+    False to fall through to normal AI handling (only when the bot is
+    @mentioned or the message replies to the bot).
+    """
+    chat_id = message.chat.id
+    if get_group_question(chat_id):
+        # A class question is live — treat this as a student's answer.
+        name = _display_name(message.from_user)
+        add_class_answer(chat_id, message.from_user.id, name, text)
+        bot.send_message(
+            chat_id,
+            f"✅ Ստացա քո պատասխանը, <b>{html.escape(name)}</b> 🙂",
+            parse_mode="HTML",
+        )
+        return True
+    # No active question: engage only when directly addressed.
+    if _is_reply_to_bot(message) or _mentions_bot(message):
+        return False
+    return True  # ignore ordinary group chatter
+
+
+# ── Leaderboard (Feature 5) ──────────────────────────────────────────────────
+@bot.message_handler(commands=["leaderboard"], func=is_allowed)
+def cmd_leaderboard(message):
+    board = get_leaderboard(message.chat.id)
+    if not board:
+        bot.send_message(
+            message.chat.id,
+            "🏆 Դեռ միավորներ չկան։ Անցիր վիկտորինաներ, խաղեր կամ /duel՝ "
+            "միավորներ վաստակելու համար 🙂",
+            parse_mode="HTML",
+        )
+        return
+    medals = ["🥇", "🥈", "🥉"]
+    lines = ["🏆 <b>Առաջատարների աղյուսակ</b>", ""]
+    for i, (name, points) in enumerate(board[:20]):
+        prefix = medals[i] if i < 3 else f"{i + 1}."
+        lines.append(f"{prefix} <b>{html.escape(str(name))}</b> — {points}")
+    bot.send_message(message.chat.id, "\n".join(lines), parse_mode="HTML")
+
+
+# ── Duel: two-player quiz race (Feature 6) ───────────────────────────────────
+# One duel per chat, keyed by chat_id in bot/history.py. Both players answer
+# the SAME questions in synchronized rounds: a round advances only once every
+# participant has answered it, then the correct option is revealed. Winner is
+# highest score, ties broken by total answer time. Dropouts are handled by
+# /endduel (finalizes with current scores) and by the state's TTL.
+def _start_duel(chat_id: int, starter, topic: str, source: str) -> None:
+    if get_duel(chat_id):
+        bot.send_message(
+            chat_id,
+            "Այս զրույցում արդեն ակտիվ մենամարտ կա 🙂 Ավարտիր այն /endduel-ով։",
+            parse_mode="HTML",
+        )
+        return
+    try:
+        with keep_typing(chat_id):
+            questions = generate_quiz(starter.id, source)
+    except Exception as e:
+        print(f"Duel generation error: {e}")
+        questions = []
+    if not questions:
+        bot.send_message(
+            chat_id,
+            "Չստացվեց պատրաստել մենամարտը։ Փորձիր նորից մի փոքր ուշ։",
+            parse_mode="HTML",
+        )
+        return
+    now = int(time.time())
+    state = {
+        "topic": topic,
+        "questions": questions,
+        "status": "waiting",
+        "cur": 0,
+        "round_ts": now,
+        "starter": starter.id,
+        "players": {
+            str(starter.id): {
+                "name": _display_name(starter),
+                "score": 0,
+                "answered": [],
+                "time": 0,
+            }
+        },
+    }
+    if not save_duel(chat_id, state):
+        bot.send_message(
+            chat_id,
+            "Մենամարտը հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
+            parse_mode="HTML",
+        )
+        return
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("🤝 Միանալ", callback_data="duel:join"))
+    bot.send_message(
+        chat_id,
+        f"🤝 <b>Մենամարտ՝ {html.escape(topic)}</b>\n\n"
+        f"<b>{html.escape(_display_name(starter))}</b>-ը մարտահրավեր է նետում։ "
+        "Ո՞վ է միանում 👇 (կամ գրիր /join)",
+        reply_markup=kb,
+        parse_mode="HTML",
+    )
+
+
+def _join_duel(chat_id: int, user) -> None:
+    state = get_duel(chat_id)
+    if not state or state["status"] != "waiting":
+        bot.send_message(
+            chat_id, "Միանալու ակտիվ մենամարտ չկա 🙂", parse_mode="HTML"
+        )
+        return
+    uid = str(user.id)
+    if uid in state["players"]:
+        bot.send_message(chat_id, "Դու արդեն մասնակից ես 🙂", parse_mode="HTML")
+        return
+    if len(state["players"]) >= 2:
+        bot.send_message(chat_id, "Մենամարտն արդեն լրացված է 🙂", parse_mode="HTML")
+        return
+    state["players"][uid] = {
+        "name": _display_name(user),
+        "score": 0,
+        "answered": [],
+        "time": 0,
+    }
+    state["status"] = "active"
+    state["round_ts"] = int(time.time())
+    save_duel(chat_id, state)
+    bot.send_message(
+        chat_id,
+        f"<b>{html.escape(_display_name(user))}</b>-ը միացավ։ Սկսում ենք 🤝",
+        parse_mode="HTML",
+    )
+    _send_duel_question(chat_id, state)
+
+
+def _send_duel_question(chat_id: int, state: dict) -> None:
+    cur, questions = state["cur"], state["questions"]
+    q = questions[cur]
+    kb = types.InlineKeyboardMarkup()
+    for i, opt in enumerate(q["options"]):
+        kb.add(types.InlineKeyboardButton(opt, callback_data=f"duelans:{cur}:{i}"))
+    bot.send_message(
+        chat_id,
+        f"🤝 <b>Հարց {cur + 1}/{len(questions)}</b>\n\n{html.escape(q['q'])}",
+        reply_markup=kb,
+        parse_mode="HTML",
+    )
+
+
+def _handle_duel_answer(chat_id: int, user, data: str) -> None:
+    state = get_duel(chat_id)
+    if not state or state["status"] != "active":
+        return
+    try:
+        _, qidx_s, opt_s = data.split(":")
+        qidx, opt = int(qidx_s), int(opt_s)
+    except ValueError:
+        return
+    uid = str(user.id)
+    if uid not in state["players"]:
+        return  # a non-participant tapped the buttons — ignore
+    if qidx != state["cur"]:
+        return  # stale tap on a past round
+    player = state["players"][uid]
+    if qidx in player["answered"]:
+        return  # this player already answered the current question
+    player["answered"].append(qidx)
+    now = int(time.time())
+    player["time"] = player.get("time", 0) + max(0, now - state.get("round_ts", now))
+    q = state["questions"][qidx]
+    if opt == q["correct"]:
+        player["score"] += 1
+    bot.send_message(
+        chat_id,
+        f"✅ <b>{html.escape(player['name'])}</b>-ը պատասխանեց",
+        parse_mode="HTML",
+    )
+    # Advance only when every participant has answered this round.
+    if all(qidx in p["answered"] for p in state["players"].values()):
+        correct_text = q["options"][q["correct"]]
+        bot.send_message(
+            chat_id,
+            f"➡️ Ճիշտ պատասխանը՝ «<b>{html.escape(correct_text)}</b>»",
+            parse_mode="HTML",
+        )
+        state["cur"] += 1
+        state["round_ts"] = int(time.time())
+        if state["cur"] >= len(state["questions"]):
+            _finish_duel(chat_id, state)
+        else:
+            save_duel(chat_id, state)
+            _send_duel_question(chat_id, state)
+    else:
+        save_duel(chat_id, state)
+
+
+def _finish_duel(chat_id: int, state: dict) -> None:
+    players = state["players"]
+    # Rank by score desc, then by total answer time asc (faster wins ties).
+    ranked = sorted(
+        players.items(), key=lambda kv: (-kv[1]["score"], kv[1].get("time", 0))
+    )
+    clear_duel(chat_id)
+    lines = ["🤝 <b>Մենամարտն ավարտվեց։</b>", ""]
+    for _uid, p in ranked:
+        lines.append(f"• <b>{html.escape(p['name'])}</b> — {p['score']} միավոր")
+    lines.append("")
+    if len(ranked) >= 2 and ranked[0][1]["score"] == ranked[1][1]["score"]:
+        lines.append("Ոչ-ոքի՛ 🤝 Երկուսդ էլ հիանալի էիք։")
+    else:
+        win_uid, win = ranked[0]
+        lines.append(f"🏆 Հաղթող՝ <b>{html.escape(win['name'])}</b> 🎉")
+        # Reward the winner on the chat's leaderboard.
+        add_score(chat_id, int(win_uid), win["name"], 3)
+    bot.send_message(chat_id, "\n".join(lines), parse_mode="HTML")
+
+
+@bot.message_handler(commands=["duel"], func=is_allowed)
+def cmd_duel(message):
+    chat_id, user_id = message.chat.id, message.from_user.id
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) > 1 and parts[1].strip():
+        topic = parts[1].strip()
+        _start_duel(chat_id, message.from_user, topic, topic)
+        return
+    consp = get_last_conspectus(user_id)
+    if consp:
+        _start_duel(chat_id, message.from_user, consp["topic"], consp["text"])
+        return
+    if not set_mode(user_id, "duel_topic"):
+        bot.send_message(
+            chat_id,
+            "Մենամարտը հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
+            parse_mode="HTML",
+        )
+        return
+    bot.send_message(
+        chat_id,
+        "🤝 Ո՞ր թեմայով մենամարտենք։ Գրիր թեման, և ես կպատրաստեմ հարցերը 🙂",
+        parse_mode="HTML",
+    )
+
+
+@bot.message_handler(commands=["join"], func=is_allowed)
+def cmd_join(message):
+    _join_duel(message.chat.id, message.from_user)
+
+
+@bot.message_handler(commands=["endduel"], func=is_allowed)
+def cmd_endduel(message):
+    state = get_duel(message.chat.id)
+    if not state:
+        bot.send_message(
+            message.chat.id, "Ակտիվ մենամարտ չկա 🙂", parse_mode="HTML"
+        )
+        return
+    if state["status"] == "waiting":
+        clear_duel(message.chat.id)
+        bot.send_message(
+            message.chat.id, "Մենամարտը չեղարկվեց 🙂", parse_mode="HTML"
+        )
+        return
+    # Active duel ended early (e.g. a player dropped out): settle on scores.
+    _finish_duel(message.chat.id, state)
+
+
+@bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("duel"))
+def cb_duel(call):
+    bot.answer_callback_query(call.id)
+    if call.data == "duel:join":
+        _join_duel(call.message.chat.id, call.from_user)
+    elif call.data.startswith("duelans:"):
+        _handle_duel_answer(call.message.chat.id, call.from_user, call.data)
+
+
 # ── Quiz mode (Feature 1) ───────────────────────────────────────────────────
 def _start_quiz(chat_id: int, user_id: int) -> None:
     """Generate a quiz from the user's last conspectus and ask question 1."""
@@ -867,6 +1281,8 @@ def _send_quiz_question(chat_id: int, user_id: int) -> None:
     kb = types.InlineKeyboardMarkup()
     for opt_i, opt in enumerate(q["options"]):
         kb.add(types.InlineKeyboardButton(opt, callback_data=f"quizans:{idx}:{opt_i}"))
+    # Feature 2: a hint button that guides without revealing the answer.
+    kb.add(types.InlineKeyboardButton("💡 Հուշում", callback_data="qhint"))
     bot.send_message(
         chat_id,
         f"❓ <b>Հարց {idx + 1}/{len(questions)}</b>\n\n{html.escape(q['q'])}",
@@ -875,20 +1291,53 @@ def _send_quiz_question(chat_id: int, user_id: int) -> None:
     )
 
 
-def _handle_quiz_answer(chat_id: int, user_id: int, data: str) -> None:
-    """Grade a tapped option, give Armenian feedback, advance the quiz."""
+def _send_quiz_hint(chat_id: int, user_id: int) -> None:
+    """Give a hint for the quiz question currently being asked (Feature 2)."""
     state = get_quiz(user_id)
     if not state:
         return
+    idx, questions = state["idx"], state["questions"]
+    if idx >= len(questions):
+        return
+    q = questions[idx]
+    try:
+        with keep_typing(chat_id):
+            hint = generate_quiz_hint(user_id, q["q"], q["options"])
+    except Exception as e:
+        print(f"Quiz hint error: {e}")
+        hint = ""
+    if not (hint and hint.strip()):
+        bot.send_message(
+            chat_id, "Չստացվեց հուշում տալ։ Փորձիր նորից 🙂", parse_mode="HTML"
+        )
+        return
+    bot.send_message(chat_id, f"💡 <b>Հուշում.</b> {html.escape(hint)}", parse_mode="HTML")
+
+
+@bot.callback_query_handler(func=lambda c: c.data == "qhint")
+def cb_quiz_hint(call):
+    bot.answer_callback_query(call.id)
+    _send_quiz_hint(call.message.chat.id, call.from_user.id)
+
+
+def _handle_quiz_answer(chat_id: int, user_id: int, data: str) -> bool:
+    """Grade a tapped option, give Armenian feedback, advance the quiz.
+
+    Returns True if the answer was correct (so the caller can award a
+    leaderboard point), False otherwise or on a stale/invalid tap.
+    """
+    state = get_quiz(user_id)
+    if not state:
+        return False
     try:
         _, qidx_s, opt_s = data.split(":")
         qidx, opt = int(qidx_s), int(opt_s)
     except ValueError:
-        return
+        return False
     # Ignore taps on an old question (e.g. the student scrolled up and
     # re-tapped a previous question's buttons).
     if qidx != state["idx"]:
-        return
+        return False
     q = state["questions"][qidx]
     correct = q["correct"]
     explanation = q.get("explanation", "")
@@ -913,6 +1362,12 @@ def _handle_quiz_answer(chat_id: int, user_id: int, data: str) -> None:
     state["idx"] += 1
     update_quiz(user_id, state)
     _send_quiz_question(chat_id, user_id)
+    return is_correct
+
+
+def _award_point(chat_id: int, user) -> None:
+    """Give a user one leaderboard point in the current chat (Feature 5)."""
+    add_score(chat_id, user.id, _display_name(user), 1)
 
 
 def _finish_quiz(chat_id: int, user_id: int, state: dict) -> None:
@@ -953,7 +1408,8 @@ def cb_quiz(call):
     if call.data == "quiz:start":
         _start_quiz(chat_id, user_id)
     elif call.data.startswith("quizans:"):
-        _handle_quiz_answer(chat_id, user_id, call.data)
+        if _handle_quiz_answer(chat_id, user_id, call.data):
+            _award_point(chat_id, call.from_user)
 
 
 # ── Flashcard mode ───────────────────────────────────────────────────────────
@@ -1269,21 +1725,26 @@ def _send_game_round(chat_id: int, user_id: int) -> None:
         )
 
 
-def _handle_tf_answer(chat_id: int, user_id: int, data: str) -> None:
-    """Grade a tapped True/False button and advance the game."""
+def _handle_tf_answer(chat_id: int, user_id: int, data: str) -> bool:
+    """Grade a tapped True/False button and advance the game.
+
+    Returns True if the tap was a correct answer (so the caller can award a
+    leaderboard point), False otherwise or on a stale/invalid tap.
+    """
     state = get_game(user_id)
     if not state or state["kind"] != "tf":
-        return
+        return False
     try:
         _, idx_s, val_s = data.split(":")
         idx, said_true = int(idx_s), int(val_s) == 1
     except ValueError:
-        return
+        return False
     if idx != state["idx"]:
-        return  # stale tap on an earlier round
+        return False  # stale tap on an earlier round
     r = state["rounds"][idx]
     why = r.get("why", "")
-    if said_true == r["ok"]:
+    is_correct = said_true == r["ok"]
+    if is_correct:
         state["score"] += 1
         bot.send_message(
             chat_id, f"✅ <b>Ճիշտ է։</b> {html.escape(why)}".rstrip(), parse_mode="HTML"
@@ -1298,6 +1759,7 @@ def _handle_tf_answer(chat_id: int, user_id: int, data: str) -> None:
     state["idx"] += 1
     update_game(user_id, state)
     _send_game_round(chat_id, user_id)
+    return is_correct
 
 
 def _handle_word_guess(message, text: str) -> bool:
@@ -1318,6 +1780,7 @@ def _handle_word_guess(message, text: str) -> bool:
     word = r["word"]
     if _normalize_guess(text) == _normalize_guess(word):
         state["score"] += 1
+        _award_point(chat_id, message.from_user)
         bot.send_message(
             chat_id, f"✅ <b>Ճիշտ է՝ {html.escape(word)}</b> 🎉", parse_mode="HTML"
         )
@@ -1378,7 +1841,8 @@ def cb_game(call):
 @bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("tfans:"))
 def cb_tf_answer(call):
     bot.answer_callback_query(call.id)
-    _handle_tf_answer(call.message.chat.id, call.from_user.id, call.data)
+    if _handle_tf_answer(call.message.chat.id, call.from_user.id, call.data):
+        _award_point(call.message.chat.id, call.from_user)
 
 
 # ── Daily challenge (Feature 5) ──────────────────────────────────────────────
@@ -1533,6 +1997,47 @@ def _make_exam(message, topic: str) -> None:
     send_reply(message, f"🎓 <b>{html.escape(topic)}</b>\n\n{exam}")
 
 
+# ── Dictionary (Feature 3 / smart-learning) ──────────────────────────────────
+def _define_word(message, word: str) -> None:
+    """Explain a word and send it."""
+    try:
+        with keep_typing(message.chat.id):
+            explanation = define_word(message.from_user.id, word)
+    except Exception as e:
+        print(f"Word definition error: {e}")
+        explanation = ""
+    if not (explanation and explanation.strip()):
+        bot.send_message(
+            message.chat.id,
+            "Չստացվեց բացատրել բառը։ Փորձիր նորից մի փոքր ուշ։",
+            parse_mode="HTML",
+        )
+        return
+    send_reply(message, f"📖 {explanation}")
+
+
+@bot.message_handler(commands=["word"], func=is_allowed)
+def cmd_word(message):
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) > 1 and parts[1].strip():
+        # Inline form: /word <the word> — define it right away.
+        _define_word(message, parts[1].strip())
+        return
+    if not set_mode(message.from_user.id, "word_lookup"):
+        bot.send_message(
+            message.chat.id,
+            "Բառարանը հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
+            parse_mode="HTML",
+        )
+        return
+    bot.send_message(
+        message.chat.id,
+        "📖 <b>Բառարան</b>\n\nԳրիր դժվար բառը, և ես կբացատրեմ պարզ լեզվով՝ "
+        "օրինակով 🙂",
+        parse_mode="HTML",
+    )
+
+
 # ── Study plan (Feature 3) ───────────────────────────────────────────────────
 @bot.message_handler(commands=["plan"], func=is_allowed)
 def cmd_plan(message):
@@ -1588,6 +2093,10 @@ def _route_pending_mode(message, text: str, mode: dict) -> bool:
         clear_mode(message.from_user.id)
         _make_exam(message, text)
         return True
+    if name == "word_lookup":
+        clear_mode(message.from_user.id)
+        _define_word(message, text)
+        return True
     if name == "plan":
         clear_mode(message.from_user.id)
         _make_study_plan(message, text)
@@ -1598,6 +2107,10 @@ def _route_pending_mode(message, text: str, mode: dict) -> bool:
         return True
     if name == "game_word":
         return _handle_word_guess(message, text)
+    if name == "duel_topic":
+        clear_mode(message.from_user.id)
+        _start_duel(message.chat.id, message.from_user, text, text)
+        return True
     return False
 
 
@@ -1614,6 +2127,9 @@ def handle_message(message):
     # Track the user + count the message for the /admin dashboard.
     touch_user(message.from_user.id)
     incr_messages()
+    # In group chats, only engage on answers / mentions / replies (Feature 4).
+    if _is_group(message) and _handle_group_message(message, text):
+        return
     if is_rate_limited(message.from_user.id):
         limit_msg = f"Դու հասել ես օրական {RATE_LIMIT} հաղորդագրության սահմանին։ Փորձիր նորից վաղը 🙂"
         bot.send_message(message.chat.id, limit_msg, parse_mode="HTML")

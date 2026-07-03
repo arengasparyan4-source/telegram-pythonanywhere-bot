@@ -615,3 +615,49 @@ def generate_exam(user_id: int, topic: str) -> str:
         {"role": "user", "content": instruction},
     ]
     return sanitize_reply(generate(user_id, messages))
+
+
+def generate_quiz_hint(user_id: int, question: str, options: list) -> str:
+    """Give a hint for a multiple-choice question WITHOUT revealing the answer.
+
+    One-shot call (no history). The model is explicitly told not to state or
+    point to the correct option — only to nudge the student's reasoning. In
+    the question's language.
+    """
+    opts = "; ".join(str(o) for o in (options or []))
+    instruction = (
+        "A student is stuck on this multiple-choice question. Give ONE short, "
+        "encouraging HINT that guides their thinking toward the answer. "
+        "Do NOT reveal the answer, do NOT say which option is correct, and do "
+        "NOT restate an option as the answer — only nudge them on how to reason "
+        "or what idea to recall. Reply in the SAME language as the question."
+        + _grade_clause(user_id)
+        + " Output ONLY the hint.\n\n"
+        f"Question: {question}\nOptions: {opts}"
+    )
+    messages = [
+        {"role": "system", "content": _build_system_prompt(user_id)},
+        {"role": "user", "content": instruction},
+    ]
+    return sanitize_reply(generate(user_id, messages))
+
+
+def define_word(user_id: int, word: str) -> str:
+    """Explain a difficult word in simple language with an example (Feature 3).
+
+    One-shot call (no history). Gives a short child-friendly meaning plus one
+    example sentence using the word, in the word's language (Armenian default).
+    """
+    instruction = (
+        f"A child asks what the word «{word}» means. Explain it in the very "
+        "simplest language a child would understand, then give ONE example "
+        "sentence that uses the word naturally. Keep it short and warm. Put the "
+        "word itself in <b>bold</b>. Reply in the SAME language as the word "
+        "(Armenian by default)." + _grade_clause(user_id) + " "
+        "Output ONLY the explanation and the example."
+    )
+    messages = [
+        {"role": "system", "content": _build_system_prompt(user_id)},
+        {"role": "user", "content": instruction},
+    ]
+    return sanitize_reply(generate(user_id, messages))
