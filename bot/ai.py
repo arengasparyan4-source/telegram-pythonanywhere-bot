@@ -588,3 +588,30 @@ def generate_why_matters(user_id: int, topic: str, conspectus_text: str) -> str:
         {"role": "user", "content": instruction},
     ]
     return sanitize_reply(generate(user_id, messages))
+
+
+def generate_exam(user_id: int, topic: str) -> str:
+    """Generate a full exam-prep review session for a topic (Feature 1).
+
+    One-shot call (does not touch conversation history). Produces a key-points
+    summary, 10 practice questions, and a short readiness self-check, formatted
+    with HTML headings. Armenian by default (mirrors the topic's language).
+    """
+    instruction = (
+        f"Create a complete exam-preparation review session for a schoolchild on "
+        f"the topic «{topic}». Structure it with three clear sections:\n"
+        "1) 🎯 <b>Հիմնական կետեր</b> — a short bullet-point summary of the key "
+        "points to know.\n"
+        "2) 📝 <b>Վարժանք</b> — EXACTLY 10 numbered practice questions of "
+        "increasing difficulty. Do NOT include the answers.\n"
+        "3) ✅ <b>Պատրաստության ստուգում</b> — 2-3 quick self-check questions the "
+        "student should be able to answer if they are ready.\n"
+        "Use the HTML section headings shown above. Reply in the SAME language as "
+        "the topic (Armenian by default)." + _grade_clause(user_id) + " "
+        "Output ONLY the review session."
+    )
+    messages = [
+        {"role": "system", "content": _build_system_prompt(user_id)},
+        {"role": "user", "content": instruction},
+    ]
+    return sanitize_reply(generate(user_id, messages))

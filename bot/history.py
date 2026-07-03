@@ -1,6 +1,7 @@
 import json
+import time
 from bot.clients import store
-from bot.config import MAX_HISTORY, HISTORY_TTL
+from bot.config import ADMIN_SESSION_TTL, MAX_HISTORY, HISTORY_TTL
 
 # ── Interface language (Feature 7) ───────────────────────────────────────────
 # A FIXED per-user language for the bot's own strings (menus / commands /
@@ -148,6 +149,129 @@ def clear_weakspot(user_id: int, topic: str) -> None:
             store.set(f"weak:{user_id}", json.dumps(weak))
     except Exception as e:
         print(f"Store write error (weakspots clear): {e}")
+
+
+# ── User tracking + admin stats (/admin) ─────────────────────────────────────
+# Aggregate, bot-wide usage tracked for the admin dashboard:
+#   seen:{uid}       last-active epoch seconds for a user (O(1) write/msg)
+#   known:{uid}      one-time marker so a user is added to the index once
+#   users:index      JSON list of every user_id string ever seen
+#   stat:messages:total   global counter of messages processed
+# Per-message writes stay O(1) (a seen: set + a set_nx probe); the index is
+# only appended to when a brand-new user appears. Aggregation (get_admin_stats)
+# is O(users) and runs only when an admin views the dashboard.
+_USERS_INDEX_KEY = "users:index"
+_MESSAGES_KEY = "stat:messages:total"
+
+
+def _load_users_index() -> list:
+    if store is None:
+        return []
+    try:
+        data = store.get(_USERS_INDEX_KEY)
+        return json.loads(data) if data else []
+    except Exception as e:
+        print(f"Store read error (users index): {e}")
+        return []
+
+
+def touch_user(user_id: int, now: int | None = None) -> None:
+    """Record that ``user_id`` just interacted, updating last-seen time.
+
+    Adds the user to the global index the first time they're seen. No-op
+    without a store. Never raises — tracking must not break a reply.
+    """
+    if store is None:
+        return
+    ts = int(now if now is not None else time.time())
+    try:
+        store.set(f"seen:{user_id}", str(ts))
+        # set_nx wins only the first time we ever see this user — append then.
+        if store.set_nx(f"known:{user_id}", "1"):
+            index = _load_users_index()
+            if str(user_id) not in index:
+                index.append(str(user_id))
+                store.set(_USERS_INDEX_KEY, json.dumps(index))
+    except Exception as e:
+        print(f"Store write error (touch_user): {e}")
+
+
+def incr_messages() -> None:
+    """Count one processed message toward the bot-wide total."""
+    if store is None:
+        return
+    try:
+        store.incr(_MESSAGES_KEY)
+    except Exception as e:
+        print(f"Store incr error (messages): {e}")
+
+
+def get_message_count() -> int:
+    """Total messages processed bot-wide (0 if untracked/unavailable)."""
+    if store is None:
+        return 0
+    try:
+        return int(store.get(_MESSAGES_KEY) or 0)
+    except Exception as e:
+        print(f"Store read error (messages): {e}")
+        return 0
+
+
+def get_admin_stats(now: int | None = None) -> dict:
+    """Aggregate bot-wide usage for the /admin dashboard.
+
+    Returns total_users, active_today (seen in the last 24h), active_week
+    (last 7 days), total_messages, and total_conspectuses (summed from the
+    per-user counters in bot/stats.py). Safe/zeroed when the store is off.
+    """
+    now = int(now if now is not None else time.time())
+    uids = _load_users_index()
+    day_ago, week_ago = now - 86400, now - 7 * 86400
+    active_today = active_week = 0
+    total_conspectuses = 0
+    from bot.stats import get_stats  # lazy: avoid import cycle at module load
+
+    for uid in uids:
+        try:
+            seen = store.get(f"seen:{uid}") if store is not None else None
+            if seen is not None:
+                ts = int(seen)
+                if ts >= day_ago:
+                    active_today += 1
+                if ts >= week_ago:
+                    active_week += 1
+            total_conspectuses += get_stats(int(uid)).get("conspectuses", 0)
+        except Exception as e:
+            print(f"Admin stats error for {uid}: {e}")
+    return {
+        "total_users": len(uids),
+        "active_today": active_today,
+        "active_week": active_week,
+        "total_messages": get_message_count(),
+        "total_conspectuses": total_conspectuses,
+    }
+
+
+# ── Admin session (remembers a successful /admin login) ──────────────────────
+def start_admin_session(user_id: int) -> None:
+    """Mark the user as an authenticated admin for ADMIN_SESSION_TTL seconds."""
+    if store is None:
+        return
+    try:
+        store.set(f"admin:{user_id}", "1", ex=ADMIN_SESSION_TTL)
+    except Exception as e:
+        print(f"Store write error (admin session): {e}")
+
+
+def is_admin(user_id: int) -> bool:
+    """True if the user has a live (non-expired) admin session."""
+    if store is None:
+        return False
+    try:
+        return store.get(f"admin:{user_id}") == "1"
+    except Exception as e:
+        print(f"Store read error (admin session): {e}")
+        return False
 
 
 def get_history(user_id: int) -> list:

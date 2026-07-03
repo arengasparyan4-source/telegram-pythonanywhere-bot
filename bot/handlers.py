@@ -1,3 +1,4 @@
+import hmac
 import html
 import io
 import os
@@ -6,6 +7,7 @@ from datetime import datetime
 from telebot import types
 from bot.clients import bot, BOT_INFO, store
 from bot.config import (
+    ADMIN_PASSWORD,
     COMMIT_SHA,
     GAME_NUM_ROUNDS,
     HF_SPACE_ID,
@@ -43,10 +45,15 @@ from bot.helpers import is_allowed, keep_typing, send_reply, should_respond
 from bot.history import (
     add_favorite,
     clear_history,
+    get_admin_stats,
     get_favorites,
+    incr_messages,
+    is_admin,
     list_weakspots,
     record_weak_answer,
     set_language,
+    start_admin_session,
+    touch_user,
 )
 from bot.i18n import help_lines, t
 from bot.jokes import jokes_disabled, set_jokes_disabled
@@ -111,6 +118,8 @@ def _log(message, direction: str, text: str) -> None:
 
 @bot.message_handler(commands=["start"], func=is_allowed)
 def cmd_start(message):
+    # First contact counts as a unique user, even before any message is sent.
+    touch_user(message.from_user.id)
     bot.send_message(
         message.chat.id,
         "<b>Բարև 👋 Ես քո ուսումնական օգնականն եմ։</b> Գրիր ինձ քո դասագրքի անունը կամ թեման, "
@@ -732,6 +741,77 @@ def cb_weakspots(call):
     if 0 <= idx < len(topics):
         _regenerate_from_topic(
             call.message.chat.id, call.from_user.id, topics[idx], call.message
+        )
+
+
+# ── Admin statistics (/admin) ────────────────────────────────────────────────
+# Password-gated, bot-wide usage dashboard. The password lives only in the
+# ADMIN_PASSWORD env var; a correct entry starts a time-limited admin session
+# (bot/history.py) so it isn't re-typed on every /admin. Deliberately NOT
+# listed in /help — it's an operator tool, not a student command.
+def _show_admin_stats(chat_id: int) -> None:
+    s = get_admin_stats()
+    bot.send_message(
+        chat_id,
+        "🔐 <b>Ադմինի վիճակագրություն</b>\n\n"
+        f"👥 Օգտատերեր (ընդամենը)՝ <b>{s['total_users']}</b>\n"
+        f"🟢 Ակտիվ այսօր (վերջին 24ժ)՝ <b>{s['active_today']}</b>\n"
+        f"📆 Ակտիվ այս շաբաթ (վերջին 7 օր)՝ <b>{s['active_week']}</b>\n"
+        f"💬 Մշակված հաղորդագրություններ՝ <b>{s['total_messages']}</b>\n"
+        f"📝 Ստեղծված կոնսպեկտներ՝ <b>{s['total_conspectuses']}</b>",
+        parse_mode="HTML",
+    )
+
+
+def _password_ok(text: str) -> bool:
+    """Constant-time password check. Always False when no password is set."""
+    if not ADMIN_PASSWORD:
+        return False
+    return hmac.compare_digest((text or "").strip().encode(), ADMIN_PASSWORD.encode())
+
+
+@bot.message_handler(commands=["admin"], func=is_allowed)
+def cmd_admin(message):
+    user_id = message.from_user.id
+    if not ADMIN_PASSWORD:
+        # Fail-closed: no password configured means the feature is off.
+        bot.send_message(message.chat.id, "Ադմինի ռեժիմն անջատված է 🙂", parse_mode="HTML")
+        return
+    if is_admin(user_id):
+        # Live session — skip the password prompt.
+        _show_admin_stats(message.chat.id)
+        return
+    if not set_mode(user_id, "admin_login"):
+        bot.send_message(
+            message.chat.id,
+            "Ադմինի ռեժիմը հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
+            parse_mode="HTML",
+        )
+        return
+    bot.send_message(
+        message.chat.id, "🔐 Մուտքագրիր ադմինի գաղտնաբառը՝", parse_mode="HTML"
+    )
+
+
+def _handle_admin_login(message, text: str) -> None:
+    """Verify the typed admin password and either open or reject the session."""
+    user_id = message.from_user.id
+    clear_mode(user_id)
+    # Best-effort: delete the message containing the typed password so it
+    # doesn't linger in the chat history.
+    try:
+        bot.delete_message(message.chat.id, message.message_id)
+    except Exception:
+        pass
+    if _password_ok(text):
+        start_admin_session(user_id)
+        bot.send_message(message.chat.id, "✅ Մուտքը հաջողվեց։", parse_mode="HTML")
+        _show_admin_stats(message.chat.id)
+    else:
+        bot.send_message(
+            message.chat.id,
+            "❌ Սխալ գաղտնաբառ։ Մուտքը մերժված է։",
+            parse_mode="HTML",
         )
 
 
@@ -1460,6 +1540,9 @@ def _route_pending_mode(message, text: str, mode: dict) -> bool:
     stop), False to fall through to normal conspectus handling.
     """
     name = mode.get("mode")
+    if name == "admin_login":
+        _handle_admin_login(message, text)
+        return True
     if name == "ask":
         _handle_ask(message, text)
         return True
@@ -1486,6 +1569,9 @@ def handle_message(message):
         # arrive with no usable text. Don't burn rate-limit / AI calls on them.
         return
     _log(message, "in", text)
+    # Track the user + count the message for the /admin dashboard.
+    touch_user(message.from_user.id)
+    incr_messages()
     if is_rate_limited(message.from_user.id):
         limit_msg = f"Դու հասել ես օրական {RATE_LIMIT} հաղորդագրության սահմանին։ Փորձիր նորից վաղը 🙂"
         bot.send_message(message.chat.id, limit_msg, parse_mode="HTML")
@@ -1567,6 +1653,9 @@ def handle_voice(message):
         )
         return
     _log(message, "in", f"[voice] {transcript}")
+    # Track the user + count the message for the /admin dashboard.
+    touch_user(user_id)
+    incr_messages()
 
     if is_rate_limited(user_id):
         limit_msg = f"Դու հասել ես օրական {RATE_LIMIT} հաղորդագրության սահմանին։ Փորձիր նորից վաղը 🙂"

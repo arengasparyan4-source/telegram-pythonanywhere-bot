@@ -115,6 +115,14 @@ HOSTING_LABEL = os.environ.get("HOSTING_LABEL", "PythonAnywhere").strip()
 # endpoint is fail-closed.
 DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET", "").strip()
 
+# Password gating the /admin statistics command. Loaded from the environment
+# only — NEVER hardcode a real password here. When unset, /admin is
+# fail-closed: it refuses every login attempt and shows no stats.
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "").strip()
+# How long a successful /admin login is remembered before the password
+# must be entered again.
+ADMIN_SESSION_TTL = 3600  # admin session lasts 1 hour (seconds)
+
 # App
 SYSTEM_PROMPT = (
     "You are an educational assistant that helps schoolchildren study any subject from their textbooks. "
