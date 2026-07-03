@@ -105,6 +105,7 @@ def cmd_help(message):
         "/grade — ընտրել դասարանը, որ բացատրությունները հարմարեցնեմ քեզ",
         "/reset — մաքրել մեր նախորդ զրույցի պատմությունը և սկսել նորից",
         "/about — իմանալ ավելին այս բոտի մասին",
+        "/sha — ցույց տալ բոտի ընթացիկ git commit SHA-ն",
     ]
     if HF_SPACE_ID:
         lines.append("/model — փոխել AI մատակարարը")
@@ -303,6 +304,12 @@ def cmd_joke(message):
         _log(message, "out", reply)
         if i < len(steps) - 1:
             time.sleep(1.5)
+
+
+@bot.message_handler(commands=["sha"], func=is_allowed)
+def cmd_sha(message):
+    sha = COMMIT_SHA or "unknown"
+    bot.send_message(message.chat.id, f"Live SHA: {sha}")
 
 
 if HF_SPACE_ID:
