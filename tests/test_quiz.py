@@ -193,7 +193,7 @@ def test_start_quiz_generates_and_sends_first_question():
         from bot.handlers import _start_quiz
 
         _start_quiz(456, 123)
-        mock_save.assert_called_once_with(123, questions)
+        mock_save.assert_called_once_with(123, questions, "t")
         # A question message was sent containing the progress counter.
         texts = [c[0][1] for c in mock_bot.send_message.call_args_list]
         assert any("Հարց 1/2" in t for t in texts)

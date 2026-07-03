@@ -164,6 +164,15 @@ QUIZ_TTL = 3600  # an in-progress quiz expires after 1 hour (seconds)
 # Flashcard mode. After a conspectus the student can pull a short deck of
 # question/answer cards generated from that conspectus, sent one by one.
 FLASHCARD_NUM = 5  # how many flashcards to generate per session
+
+# Transient conversation modes (bot/session.py): /plan awaiting subjects,
+# /ask free-Q&A mode, and the "guess the word" game. Expires so a forgotten
+# mode doesn't trap the student in a non-default flow.
+MODE_TTL = 3600  # a pending conversation mode expires after 1 hour (seconds)
+
+# Number of true/false statements or guess-the-word rounds per /game session.
+GAME_NUM_ROUNDS = 5
+GAME_TTL = 3600  # an in-progress game expires after 1 hour (seconds)
 # The most recent conspectus is cached per user so /quiz, the inline
 # buttons, and PDF export can act on it without re-asking the AI.
 CONSPECTUS_TTL = HISTORY_TTL  # cached conspectus expires alongside history

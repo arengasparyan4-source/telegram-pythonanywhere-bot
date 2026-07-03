@@ -271,6 +271,127 @@ def generate_flashcards(
     return _parse_flashcards(raw, num_cards)
 
 
+def _parse_truefalse(raw: str, num_rounds: int) -> list:
+    """Validate the model's JSON into a list of {"s", "ok", "why"} rounds.
+
+    Each round is a statement (`s`), whether it is true (`ok`, bool), and a
+    short explanation (`why`). Returns [] on any parse/shape problem so the
+    caller can fall back to a friendly message rather than crashing.
+    """
+    if not raw:
+        return []
+    try:
+        data = json.loads(_strip_code_fence(raw))
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    rounds = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        s = item.get("s")
+        ok = item.get("ok")
+        why = item.get("why", "")
+        if not isinstance(s, str) or not s.strip():
+            continue
+        if not isinstance(ok, bool):
+            continue
+        rounds.append(
+            {
+                "s": sanitize_reply(s.strip()),
+                "ok": ok,
+                "why": sanitize_reply(str(why).strip()),
+            }
+        )
+        if len(rounds) >= num_rounds:
+            break
+    return rounds
+
+
+def generate_truefalse(user_id: int, source: str, num_rounds: int) -> list:
+    """Generate a true/false game from a topic or conspectus text.
+
+    Returns a list of {"s", "ok", "why"} rounds, roughly half true and half
+    false, in the source's language. [] on generation/parse failure.
+    """
+    instruction = (
+        f"Create exactly {num_rounds} simple TRUE/FALSE statements to test a "
+        "child's knowledge about the topic/notes below. Make roughly half true "
+        "and half false, keep each statement short and age-appropriate, and "
+        "write them in the SAME language as the topic/notes."
+        + _grade_clause(user_id)
+        + " "
+        'Return ONLY valid JSON: a list of objects with keys "s" (the statement '
+        'string), "ok" (boolean — true if the statement is correct), and "why" '
+        '(a short sentence explaining why). Do not wrap the JSON in code fences.\n\n'
+        f"Topic / notes:\n{source}"
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a quiz-game generator for schoolchildren. You output only strict JSON.",
+        },
+        {"role": "user", "content": instruction},
+    ]
+    return _parse_truefalse(generate(user_id, messages), num_rounds)
+
+
+def _parse_wordgame(raw: str, num_rounds: int) -> list:
+    """Validate the model's JSON into a list of {"word", "hint"} rounds."""
+    if not raw:
+        return []
+    try:
+        data = json.loads(_strip_code_fence(raw))
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    rounds = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        word = item.get("word")
+        hint = item.get("hint")
+        if not isinstance(word, str) or not word.strip():
+            continue
+        if not isinstance(hint, str) or not hint.strip():
+            continue
+        rounds.append(
+            {"word": sanitize_reply(word.strip()), "hint": sanitize_reply(hint.strip())}
+        )
+        if len(rounds) >= num_rounds:
+            break
+    return rounds
+
+
+def generate_word_game(user_id: int, source: str, num_rounds: int) -> list:
+    """Generate a "guess the word" game from a topic or conspectus text.
+
+    Returns a list of {"word", "hint"} rounds — a key term and a child-
+    friendly clue — in the source's language. [] on failure.
+    """
+    instruction = (
+        f"Pick exactly {num_rounds} important single words or short terms a "
+        "child should know from the topic/notes below. For each, write a short, "
+        "child-friendly hint that describes the word WITHOUT saying it. Write "
+        "everything in the SAME language as the topic/notes."
+        + _grade_clause(user_id)
+        + " "
+        'Return ONLY valid JSON: a list of objects with keys "word" (the word to '
+        'guess) and "hint" (the clue). Do not wrap the JSON in code fences.\n\n'
+        f"Topic / notes:\n{source}"
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a word-game generator for schoolchildren. You output only strict JSON.",
+        },
+        {"role": "user", "content": instruction},
+    ]
+    return _parse_wordgame(generate(user_id, messages), num_rounds)
+
+
 # Example tree shown to the model so it copies the exact format. Kept as a
 # constant so the /mindmap prompt and any tests reference the same shape.
 _MINDMAP_EXAMPLE = (
@@ -323,6 +444,121 @@ def generate_story(user_id: int, topic: str, conspectus_text: str) -> str:
         "accurate. Make it warm and vivid, not a dry summary. Reply in the SAME "
         "language as the study notes." + _grade_clause(user_id) + " "
         "Output ONLY the story.\n\n"
+        f"Study notes:\n{conspectus_text}"
+    )
+    messages = [
+        {"role": "system", "content": _build_system_prompt(user_id)},
+        {"role": "user", "content": instruction},
+    ]
+    return sanitize_reply(generate(user_id, messages))
+
+
+def answer_question(user_id: int, question: str) -> str:
+    """Answer a free-form question directly and simply (/ask mode, Feature 6).
+
+    A one-shot, child-friendly answer — deliberately NOT a structured
+    conspectus. Does not touch conversation history. Replies in the question's
+    language.
+    """
+    instruction = (
+        "Answer the child's question below clearly and simply, like a friendly "
+        "teacher. Give a direct, correct, age-appropriate answer in a few short "
+        "sentences — not a long lecture. Reply in the SAME language as the "
+        "question." + _grade_clause(user_id) + " Output ONLY the answer.\n\n"
+        f"Question:\n{question}"
+    )
+    messages = [
+        {"role": "system", "content": _build_system_prompt(user_id)},
+        {"role": "user", "content": instruction},
+    ]
+    return sanitize_reply(generate(user_id, messages))
+
+
+def generate_challenge(user_id: int) -> str:
+    """Generate one short, curiosity-sparking educational challenge.
+
+    A standalone daily challenge — not tied to any conspectus and it does not
+    touch conversation history. Either a thought-provoking question or a tiny
+    fascinating fact followed by a question to ponder. Armenian by default.
+    """
+    instruction = (
+        "Give ONE short, interesting educational challenge for a curious child: "
+        "either a thought-provoking question, or a tiny fascinating fact plus a "
+        "question to think about. Pick any school subject. Keep it to 2-4 warm, "
+        "simple sentences that spark curiosity. Reply in Armenian by default."
+        + _grade_clause(user_id)
+        + " Output ONLY the challenge."
+    )
+    messages = [
+        {"role": "system", "content": _build_system_prompt(user_id)},
+        {"role": "user", "content": instruction},
+    ]
+    return sanitize_reply(generate(user_id, messages))
+
+
+def generate_study_plan(user_id: int, subjects: str) -> str:
+    """Generate a structured weekly study plan from a free-text subject list.
+
+    One-shot call (does not touch conversation history). Spreads the given
+    subjects/topics across the days of the week with short, realistic daily
+    goals, in the language the student wrote their subjects in.
+    """
+    instruction = (
+        "Create a structured weekly study plan for a schoolchild based on the "
+        "subjects/topics they want to study, listed below. Organise it by day "
+        "(Monday–Sunday): put a <b>bold day heading</b> for each day and 1-2 "
+        "short bullet lines under it saying which topic to study and roughly "
+        "for how long. Balance the load across the week, keep it realistic and "
+        "encouraging, and leave a lighter day for rest/review. Reply in the "
+        "SAME language the subjects are written in." + _grade_clause(user_id)
+        + " Output ONLY the plan.\n\n"
+        f"Subjects/topics to study:\n{subjects}"
+    )
+    messages = [
+        {"role": "system", "content": _build_system_prompt(user_id)},
+        {"role": "user", "content": instruction},
+    ]
+    return sanitize_reply(generate(user_id, messages))
+
+
+def explain_simply(user_id: int, topic: str, conspectus_text: str) -> str:
+    """Re-explain the topic as if to a 5-year-old, with everyday analogies.
+
+    One-shot call (does not touch conversation history). Uses the simplest
+    possible words and concrete comparisons a small child would recognise,
+    based on the conspectus, in the conspectus's own language.
+    """
+    instruction = (
+        f"Explain the topic «{topic}» as if you were talking to a 5-year-old "
+        "child. Use the very simplest words, short sentences, and warm everyday "
+        "analogies (toys, food, animals, home, play) so it feels obvious and "
+        "fun. Base it ONLY on these study notes and keep every fact correct. "
+        "Reply in the SAME language as the study notes." + _grade_clause(user_id)
+        + " Output ONLY the simple explanation.\n\n"
+        f"Study notes:\n{conspectus_text}"
+    )
+    messages = [
+        {"role": "system", "content": _build_system_prompt(user_id)},
+        {"role": "user", "content": instruction},
+    ]
+    return sanitize_reply(generate(user_id, messages))
+
+
+def generate_homework(user_id: int, topic: str, conspectus_text: str) -> str:
+    """Generate 3-5 practical homework exercises from a conspectus.
+
+    One-shot call (does not touch conversation history). The tasks are drawn
+    ONLY from the conspectus so they practise exactly what the student just
+    read, are numbered, age-appropriate, and in the conspectus's language.
+    """
+    instruction = (
+        f"Based ONLY on these study notes about «{topic}», create 3-5 practical "
+        "homework exercises / tasks for a child to solve. Mix a few kinds "
+        "(a short question to answer, something to find or match, a little "
+        "problem to work out). Number them 1., 2., 3. … Keep each task short, "
+        "clear, and age-appropriate, and do NOT include the answers. Reply in "
+        "the SAME language as the study notes." + _grade_clause(user_id) + " "
+        "Output ONLY the exercises.\n\n"
         f"Study notes:\n{conspectus_text}"
     )
     messages = [

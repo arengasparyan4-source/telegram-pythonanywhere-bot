@@ -18,14 +18,20 @@ _scheduler = None
 
 
 def _tick() -> None:
-    """Fire any reminders due at the current minute. Never raises."""
+    """Fire any reminders and daily challenges due this minute. Never raises."""
+    from bot.challenges import run_due_challenges
     from bot.reminders import run_due_reminders
 
     now = datetime.now()
+    hhmm, today = now.strftime("%H:%M"), now.strftime("%Y-%m-%d")
     try:
-        run_due_reminders(now.strftime("%H:%M"), now.strftime("%Y-%m-%d"))
+        run_due_reminders(hhmm, today)
     except Exception as e:
         print(f"Reminder tick error: {e}")
+    try:
+        run_due_challenges(hhmm, today)
+    except Exception as e:
+        print(f"Challenge tick error: {e}")
 
 
 def start_scheduler() -> None:

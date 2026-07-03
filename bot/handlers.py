@@ -5,28 +5,57 @@ import time
 from datetime import datetime
 from telebot import types
 from bot.clients import bot, BOT_INFO, store
-from bot.config import COMMIT_SHA, HF_SPACE_ID, HOSTING_LABEL, MODEL, RATE_LIMIT
+from bot.config import (
+    COMMIT_SHA,
+    GAME_NUM_ROUNDS,
+    HF_SPACE_ID,
+    HOSTING_LABEL,
+    MODEL,
+    RATE_LIMIT,
+)
 from bot.ai import (
+    answer_question,
     ask_ai,
     expand_conspectus,
+    explain_simply,
     generate_flashcards,
+    generate_homework,
     generate_mindmap,
+    generate_challenge,
     generate_quiz,
     generate_story,
+    generate_study_plan,
+    generate_truefalse,
     generate_why_matters,
+    generate_word_game,
 )
 from bot.achievements import check_and_award, get_badges
 from bot.activity import record_activity
+from bot.challenges import (
+    clear_challenge_time,
+    get_challenge_time,
+    set_challenge_time,
+)
 from bot.conspectus import get_last_conspectus, save_last_conspectus
+from bot.games import clear_game, get_game, save_game, update_game
 from bot.grade import clear_grade, get_grade, set_grade
 from bot.helpers import is_allowed, keep_typing, send_reply, should_respond
-from bot.history import clear_history
+from bot.history import (
+    add_favorite,
+    clear_history,
+    get_favorites,
+    list_weakspots,
+    record_weak_answer,
+    set_language,
+)
+from bot.i18n import help_lines, t
 from bot.jokes import jokes_disabled, set_jokes_disabled
 from bot.parent import build_report, link_child
 from bot.pdf import build_conspectus_pdf
 from bot.preferences import get_provider, set_provider
 from bot.quiz import clear_quiz, get_quiz, save_quiz, update_quiz
 from bot.rate_limit import is_rate_limited
+from bot.session import clear_mode, get_mode, set_mode
 from bot.reminders import (
     REPEAT_HEADER,
     clear_reminder,
@@ -94,26 +123,13 @@ def cmd_start(message):
 
 @bot.message_handler(commands=["help"], func=is_allowed)
 def cmd_help(message):
-    lines = [
-        "/start — սկսել զրույցը բոտի հետ",
-        "/help — տեսնել հրամանների ցանկը և օգնության ինֆորմացիա",
-        "/quiz — կարճ վիկտորինա վերջին կոնսպեկտի հիման վրա",
-        "/pdf — ստանալ վերջին կոնսպեկտը PDF ֆայլով",
-        "/stats — տեսնել քո ուսումնական վիճակագրությունը",
-        "/achievements — տեսնել քո վաստակած նշանները",
-        "/repeat — կրկնել վերջին կոնսպեկտը",
-        "/remind — դնել օրական հիշեցում (օր․՝ /remind 18:00)",
-        "/parent — ծնողի շաբաթական հաշվետվություն (/parent &lt;երեխայի ID&gt;)",
-        "/grade — ընտրել դասարանը, որ բացատրությունները հարմարեցնեմ քեզ",
-        "/reset — մաքրել մեր նախորդ զրույցի պատմությունը և սկսել նորից",
-        "/about — իմանալ ավելին այս բոտի մասին",
-        "/sha — ցույց տալ բոտի ընթացիկ git commit SHA-ն",
-    ]
+    user_id = message.from_user.id
+    lines = list(help_lines(user_id))
     if HF_SPACE_ID:
-        lines.append("/model — փոխել AI մատակարարը")
+        lines.append(t(user_id, "help_model"))
     bot.send_message(
         message.chat.id,
-        "<b>Հրամանների ցանկ</b>\n" + "\n".join(lines),
+        t(user_id, "help_title") + "\n" + "\n".join(lines),
         parse_mode="HTML",
     )
 
@@ -233,7 +249,7 @@ def cmd_repeat(message):
     send_reply(
         message,
         f"{REPEAT_HEADER}\n\n{consp['text']}",
-        reply_markup=_conspectus_keyboard(),
+        reply_markup=_conspectus_keyboard(message.from_user.id),
     )
 
 
@@ -396,18 +412,23 @@ if HF_SPACE_ID:
 # ── Conspectus inline keyboard ──────────────────────────────────────────────
 # Shown under every conspectus. Feature 1 adds the quiz button; Feature 2
 # adds "more detail" / "different topic"; Feature 4 extends it further.
-def _conspectus_keyboard():
+def _conspectus_keyboard(user_id: int):
     kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("📝 Կարճ վիկտորինա", callback_data="quiz:start"))
-    kb.add(types.InlineKeyboardButton("🧠 Flashcards", callback_data="cards:start"))
-    kb.add(types.InlineKeyboardButton("🗺 Mind Map", callback_data="mindmap:show"))
-    kb.add(types.InlineKeyboardButton("📖 Պատմություն", callback_data="story:show"))
-    kb.add(types.InlineKeyboardButton("🌍 Ինչու է կարևոր?", callback_data="why:show"))
-    kb.row(
-        types.InlineKeyboardButton("🔍 Ավելի մանրամասն", callback_data="consp:more"),
-        types.InlineKeyboardButton("📚 Ուրիշ թեմա", callback_data="consp:new"),
+    kb.add(types.InlineKeyboardButton(t(user_id, "btn_quiz"), callback_data="quiz:start"))
+    kb.add(types.InlineKeyboardButton(t(user_id, "btn_cards"), callback_data="cards:start"))
+    kb.add(types.InlineKeyboardButton(t(user_id, "btn_mindmap"), callback_data="mindmap:show"))
+    kb.add(types.InlineKeyboardButton(t(user_id, "btn_story"), callback_data="story:show"))
+    kb.add(types.InlineKeyboardButton(t(user_id, "btn_why"), callback_data="why:show"))
+    kb.add(
+        types.InlineKeyboardButton(t(user_id, "btn_homework"), callback_data="homework:show")
     )
-    kb.add(types.InlineKeyboardButton("📄 PDF", callback_data="pdf:export"))
+    kb.add(types.InlineKeyboardButton(t(user_id, "btn_simple"), callback_data="simple:show"))
+    kb.add(types.InlineKeyboardButton(t(user_id, "btn_save"), callback_data="fav:save"))
+    kb.row(
+        types.InlineKeyboardButton(t(user_id, "btn_more"), callback_data="consp:more"),
+        types.InlineKeyboardButton(t(user_id, "btn_new"), callback_data="consp:new"),
+    )
+    kb.add(types.InlineKeyboardButton(t(user_id, "btn_pdf"), callback_data="pdf:export"))
     return kb
 
 
@@ -438,7 +459,7 @@ def _more_detail(chat_id: int, user_id: int, message) -> None:
     save_last_conspectus(user_id, consp["topic"], reply)
     incr_conspectuses(user_id)
     record_activity(user_id)
-    send_reply(message, reply, reply_markup=_conspectus_keyboard())
+    send_reply(message, reply, reply_markup=_conspectus_keyboard(user_id))
     _award_new_badges(chat_id, user_id)
 
 
@@ -552,6 +573,168 @@ def cb_grade(call):
             )
 
 
+# ── Interface language (Feature 7) ───────────────────────────────────────────
+def _language_keyboard():
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("🇦🇲 Հայերեն", callback_data="lang:hy"))
+    kb.add(types.InlineKeyboardButton("🇷🇺 Русский", callback_data="lang:ru"))
+    kb.add(types.InlineKeyboardButton("🇬🇧 English", callback_data="lang:en"))
+    return kb
+
+
+@bot.message_handler(commands=["language"], func=is_allowed)
+def cmd_language(message):
+    bot.send_message(
+        message.chat.id,
+        t(message.from_user.id, "lang_choose"),
+        reply_markup=_language_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+@bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("lang:"))
+def cb_language(call):
+    bot.answer_callback_query(call.id)
+    lang = call.data.split(":", 1)[1]
+    if not set_language(call.from_user.id, lang):
+        bot.send_message(
+            call.message.chat.id,
+            "Լեզվի ընտրությունը հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
+            parse_mode="HTML",
+        )
+        return
+    # Confirm in the newly chosen language.
+    bot.send_message(
+        call.message.chat.id,
+        t(call.from_user.id, "lang_set"),
+        parse_mode="HTML",
+    )
+
+
+# ── Favorite topics (Feature 8) ──────────────────────────────────────────────
+def _regenerate_from_topic(chat_id: int, user_id: int, topic: str, message) -> None:
+    """Regenerate a conspectus for a saved favorite topic and send it."""
+    try:
+        with keep_typing(chat_id):
+            reply = ask_ai(user_id, topic)
+    except Exception as e:
+        print(f"Favorite regeneration error: {e}")
+        bot.send_message(
+            chat_id,
+            "Ինչ-որ բան այնպես չգնաց։ Խնդրում եմ՝ փորձիր նորից։",
+            parse_mode="HTML",
+        )
+        return
+    save_last_conspectus(user_id, topic, reply)
+    incr_topics(user_id)
+    incr_conspectuses(user_id)
+    record_activity(user_id)
+    send_reply(message, reply, reply_markup=_conspectus_keyboard(user_id))
+    _award_new_badges(chat_id, user_id)
+
+
+@bot.message_handler(commands=["favorites"], func=is_allowed)
+def cmd_favorites(message):
+    favs = get_favorites(message.from_user.id)
+    if not favs:
+        bot.send_message(
+            message.chat.id,
+            "⭐ Դեռ սիրելի թեմաներ չունես։ Կոնսպեկտի տակ սեղմիր «⭐ Պահել» "
+            "կոճակը՝ թեման այստեղ պահելու համար 🙂",
+            parse_mode="HTML",
+        )
+        return
+    kb = types.InlineKeyboardMarkup()
+    for i, topic in enumerate(favs):
+        kb.add(types.InlineKeyboardButton(f"⭐ {topic[:50]}", callback_data=f"fav:show:{i}"))
+    bot.send_message(
+        message.chat.id,
+        "⭐ <b>Քո սիրելի թեմաները</b>\nՍեղմիր որևէ մեկը՝ նորից կոնսպեկտ ստանալու համար 👇",
+        reply_markup=kb,
+        parse_mode="HTML",
+    )
+
+
+@bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("fav:"))
+def cb_favorites(call):
+    bot.answer_callback_query(call.id)
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    if call.data == "fav:save":
+        consp = get_last_conspectus(user_id)
+        if not consp:
+            bot.send_message(
+                chat_id,
+                "Դեռ պահելու թեմա չկա 🙂 Նախ ուղարկիր թեման։",
+                parse_mode="HTML",
+            )
+            return
+        if add_favorite(user_id, consp["topic"]):
+            bot.send_message(
+                chat_id,
+                f"⭐ Պահեցի «<b>{html.escape(consp['topic'])}</b>» թեման սիրելիների մեջ։ "
+                "Տես բոլորը՝ /favorites",
+                parse_mode="HTML",
+            )
+        else:
+            bot.send_message(
+                chat_id,
+                "Այս թեման արդեն սիրելիների մեջ է ⭐ (կամ հիշողությունն անջատված է)։",
+                parse_mode="HTML",
+            )
+        return
+    if call.data.startswith("fav:show:"):
+        try:
+            idx = int(call.data[len("fav:show:") :])
+        except ValueError:
+            return
+        favs = get_favorites(user_id)
+        if 0 <= idx < len(favs):
+            _regenerate_from_topic(chat_id, user_id, favs[idx], call.message)
+
+
+# ── Weak spots (Feature 9) ───────────────────────────────────────────────────
+@bot.message_handler(commands=["weakspots"], func=is_allowed)
+def cmd_weakspots(message):
+    topics = list_weakspots(message.from_user.id)
+    if not topics:
+        bot.send_message(
+            message.chat.id,
+            "🎯 Առայժմ թույլ կողմեր չկան 👍 Անցիր վիկտորինաներ (/quiz), և եթե ինչ-որ "
+            "թեմա դժվար լինի, այն կհայտնվի այստեղ՝ կրկնելու համար։",
+            parse_mode="HTML",
+        )
+        return
+    kb = types.InlineKeyboardMarkup()
+    for i, topic in enumerate(topics):
+        kb.add(
+            types.InlineKeyboardButton(f"🎯 {topic[:50]}", callback_data=f"weak:show:{i}")
+        )
+    bot.send_message(
+        message.chat.id,
+        "🎯 <b>Քո թույլ կողմերը</b>\nԱյս թեմաները դեռ դժվար են։ Սեղմիր որևէ մեկը՝ "
+        "կրկնելու համար, հետո անցիր /quiz՝ դրանք «մարելու» համար 👇",
+        reply_markup=kb,
+        parse_mode="HTML",
+    )
+
+
+@bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("weak:"))
+def cb_weakspots(call):
+    bot.answer_callback_query(call.id)
+    if not call.data.startswith("weak:show:"):
+        return
+    try:
+        idx = int(call.data[len("weak:show:") :])
+    except ValueError:
+        return
+    topics = list_weakspots(call.from_user.id)
+    if 0 <= idx < len(topics):
+        _regenerate_from_topic(
+            call.message.chat.id, call.from_user.id, topics[idx], call.message
+        )
+
+
 # ── Quiz mode (Feature 1) ───────────────────────────────────────────────────
 def _start_quiz(chat_id: int, user_id: int) -> None:
     """Generate a quiz from the user's last conspectus and ask question 1."""
@@ -584,7 +767,7 @@ def _start_quiz(chat_id: int, user_id: int) -> None:
             parse_mode="HTML",
         )
         return
-    save_quiz(user_id, questions)
+    save_quiz(user_id, questions, consp["topic"])
     bot.send_message(chat_id, "Եկ ստուգենք, թե ինչ հիշեցիր 📝", parse_mode="HTML")
     _send_quiz_question(chat_id, user_id)
 
@@ -628,7 +811,8 @@ def _handle_quiz_answer(chat_id: int, user_id: int, data: str) -> None:
     q = state["questions"][qidx]
     correct = q["correct"]
     explanation = q.get("explanation", "")
-    if opt == correct:
+    is_correct = opt == correct
+    if is_correct:
         state["score"] += 1
         bot.send_message(
             chat_id,
@@ -642,6 +826,9 @@ def _handle_quiz_answer(chat_id: int, user_id: int, data: str) -> None:
             f"❌ Ճիշտ պատասխանն է՝ «<b>{html.escape(correct_text)}</b>»։ {html.escape(explanation)}".rstrip(),
             parse_mode="HTML",
         )
+    # Feature 9: attribute right/wrong to the quiz's topic so persistently
+    # missed topics surface in /weakspots (and clear once mastered).
+    record_weak_answer(user_id, state.get("topic", ""), is_correct)
     state["idx"] += 1
     update_quiz(user_id, state)
     _send_quiz_question(chat_id, user_id)
@@ -845,6 +1032,450 @@ def cb_why_matters(call):
     _send_why_matters(call.message.chat.id, call.from_user.id, call.message)
 
 
+# ── Homework exercises (Feature 1) ───────────────────────────────────────────
+def _send_homework(chat_id: int, user_id: int, message) -> None:
+    """Generate practical exercises from the last conspectus and send them."""
+    consp = get_last_conspectus(user_id)
+    if not consp:
+        bot.send_message(
+            chat_id,
+            "Նախ ուղարկիր դասագրքի անունը կամ թեման, որ պատրաստեմ կոնսպեկտ, "
+            "հետո կտամ տնային առաջադրանք 📝",
+            parse_mode="HTML",
+        )
+        return
+    try:
+        with keep_typing(chat_id):
+            homework = generate_homework(user_id, consp["topic"], consp["text"])
+    except Exception as e:
+        print(f"Homework generation error: {e}")
+        homework = ""
+    if not (homework and homework.strip()):
+        bot.send_message(
+            chat_id,
+            "Չստացվեց պատրաստել առաջադրանքը։ Փորձիր նորից մի փոքր ուշ։",
+            parse_mode="HTML",
+        )
+        return
+    send_reply(message, f"📝 <b>Տնային առաջադրանք</b>\n\n{homework}")
+
+
+@bot.callback_query_handler(
+    func=lambda c: bool(c.data) and c.data.startswith("homework:")
+)
+def cb_homework(call):
+    bot.answer_callback_query(call.id)
+    _send_homework(call.message.chat.id, call.from_user.id, call.message)
+
+
+# ── Explain simply / like I'm 5 (Feature 2) ──────────────────────────────────
+def _send_simple(chat_id: int, user_id: int, message) -> None:
+    """Re-explain the last conspectus's topic in the simplest possible way."""
+    consp = get_last_conspectus(user_id)
+    if not consp:
+        bot.send_message(
+            chat_id,
+            "Նախ ուղարկիր դասագրքի անունը կամ թեման, որ պատրաստեմ կոնսպեկտ, "
+            "հետո կբացատրեմ ամենապարզ ձևով 🔍",
+            parse_mode="HTML",
+        )
+        return
+    try:
+        with keep_typing(chat_id):
+            simple = explain_simply(user_id, consp["topic"], consp["text"])
+    except Exception as e:
+        print(f"Simple-explain generation error: {e}")
+        simple = ""
+    if not (simple and simple.strip()):
+        bot.send_message(
+            chat_id,
+            "Չստացվեց պատրաստել բացատրությունը։ Փորձիր նորից մի փոքր ուշ։",
+            parse_mode="HTML",
+        )
+        return
+    send_reply(message, f"🔍 <b>Պարզ բացատրություն</b>\n\n{simple}")
+
+
+@bot.callback_query_handler(
+    func=lambda c: bool(c.data) and c.data.startswith("simple:")
+)
+def cb_simple(call):
+    bot.answer_callback_query(call.id)
+    _send_simple(call.message.chat.id, call.from_user.id, call.message)
+
+
+# ── Game mode (Feature 4) ────────────────────────────────────────────────────
+# Two AI-generated games. "tf" (Ճիշտ/Սխալ) is button-driven like the quiz;
+# "word" (Գուշակիր բառը) shows a hint and reads the student's typed guess via
+# the "game_word" conversation mode. Score is tracked in bot/games.py state.
+def _game_keyboard():
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("✅ Ճիշտ/Սխալ", callback_data="game:tf"))
+    kb.add(types.InlineKeyboardButton("🔤 Գուշակիր բառը", callback_data="game:word"))
+    return kb
+
+
+@bot.message_handler(commands=["game"], func=is_allowed)
+def cmd_game(message):
+    if store is None:
+        bot.send_message(
+            message.chat.id,
+            "Խաղերը հասանելի են միայն հիշողություն միացված ռեժիմում 🙂",
+            parse_mode="HTML",
+        )
+        return
+    bot.send_message(
+        message.chat.id,
+        "🎮 <b>Խաղ ռեժիմ</b>\n\nԸնտրիր խաղը 👇",
+        reply_markup=_game_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+def _start_game(chat_id: int, user_id: int, kind: str, source: str) -> None:
+    """Generate a game of ``kind`` from ``source`` text and ask the first round."""
+    try:
+        with keep_typing(chat_id):
+            if kind == "tf":
+                rounds = generate_truefalse(user_id, source, GAME_NUM_ROUNDS)
+            else:
+                rounds = generate_word_game(user_id, source, GAME_NUM_ROUNDS)
+    except Exception as e:
+        print(f"Game generation error: {e}")
+        rounds = []
+    if not rounds or not save_game(user_id, kind, rounds):
+        clear_mode(user_id)
+        bot.send_message(
+            chat_id,
+            "Չստացվեց պատրաստել խաղը։ Փորձիր նորից մի փոքր ուշ։",
+            parse_mode="HTML",
+        )
+        return
+    bot.send_message(chat_id, "🎮 Խաղը սկսվեց։ Հաջողությո՛ւն 🍀", parse_mode="HTML")
+    _send_game_round(chat_id, user_id)
+
+
+def _send_game_round(chat_id: int, user_id: int) -> None:
+    """Send the current game round, or finish if the deck is exhausted."""
+    state = get_game(user_id)
+    if not state:
+        return
+    idx, rounds = state["idx"], state["rounds"]
+    if idx >= len(rounds):
+        _finish_game(chat_id, user_id, state)
+        return
+    r = rounds[idx]
+    header = f"🎮 {idx + 1}/{len(rounds)}"
+    if state["kind"] == "tf":
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("✅ Ճիշտ", callback_data=f"tfans:{idx}:1"),
+            types.InlineKeyboardButton("❌ Սխալ", callback_data=f"tfans:{idx}:0"),
+        )
+        bot.send_message(
+            chat_id,
+            f"{header}\n\n{html.escape(r['s'])}\n\nՃի՞շտ է, թե՞ սխալ։",
+            reply_markup=kb,
+            parse_mode="HTML",
+        )
+    else:  # word
+        set_mode(user_id, "game_word")
+        bot.send_message(
+            chat_id,
+            f"{header}\n\n🔤 <b>Գուշակիր բառը</b>\nԱկնարկ՝ {html.escape(r['hint'])}\n\n"
+            "Գրիր քո տարբերակը 🙂",
+            parse_mode="HTML",
+        )
+
+
+def _handle_tf_answer(chat_id: int, user_id: int, data: str) -> None:
+    """Grade a tapped True/False button and advance the game."""
+    state = get_game(user_id)
+    if not state or state["kind"] != "tf":
+        return
+    try:
+        _, idx_s, val_s = data.split(":")
+        idx, said_true = int(idx_s), int(val_s) == 1
+    except ValueError:
+        return
+    if idx != state["idx"]:
+        return  # stale tap on an earlier round
+    r = state["rounds"][idx]
+    why = r.get("why", "")
+    if said_true == r["ok"]:
+        state["score"] += 1
+        bot.send_message(
+            chat_id, f"✅ <b>Ճիշտ է։</b> {html.escape(why)}".rstrip(), parse_mode="HTML"
+        )
+    else:
+        truth = "ճիշտ" if r["ok"] else "սխալ"
+        bot.send_message(
+            chat_id,
+            f"❌ Իրականում այդ պնդումը <b>{truth}</b> է։ {html.escape(why)}".rstrip(),
+            parse_mode="HTML",
+        )
+    state["idx"] += 1
+    update_game(user_id, state)
+    _send_game_round(chat_id, user_id)
+
+
+def _handle_word_guess(message, text: str) -> bool:
+    """Check the student's typed guess in a "guess the word" game.
+
+    Returns True (message consumed) whenever a word game is active; False so
+    the message falls through to normal handling if there is no game.
+    """
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    state = get_game(user_id)
+    if not state or state["kind"] != "word":
+        clear_mode(user_id)
+        return False
+    clear_mode(user_id)  # this guess consumes the mode; next round re-sets it
+    idx = state["idx"]
+    r = state["rounds"][idx]
+    word = r["word"]
+    if _normalize_guess(text) == _normalize_guess(word):
+        state["score"] += 1
+        bot.send_message(
+            chat_id, f"✅ <b>Ճիշտ է՝ {html.escape(word)}</b> 🎉", parse_mode="HTML"
+        )
+    else:
+        bot.send_message(
+            chat_id,
+            f"❌ Ճիշտ պատասխանն էր՝ «<b>{html.escape(word)}</b>»։",
+            parse_mode="HTML",
+        )
+    state["idx"] += 1
+    update_game(user_id, state)
+    _send_game_round(chat_id, user_id)
+    return True
+
+
+def _normalize_guess(s: str) -> str:
+    """Case/space/punctuation-insensitive form for comparing word guesses."""
+    return "".join(ch for ch in (s or "").lower().strip() if ch.isalnum())
+
+
+def _finish_game(chat_id: int, user_id: int, state: dict) -> None:
+    score, total = state["score"], len(state["rounds"])
+    clear_game(user_id)
+    clear_mode(user_id)
+    record_activity(user_id)
+    bot.send_message(
+        chat_id,
+        f"🎮 <b>Խաղն ավարտվեց։</b> Դու հավաքեցիր <b>{score}/{total}</b> միավոր 🎉",
+        parse_mode="HTML",
+    )
+
+
+@bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("game:"))
+def cb_game(call):
+    bot.answer_callback_query(call.id)
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    kind = "tf" if call.data == "game:tf" else "word"
+    consp = get_last_conspectus(user_id)
+    if consp:
+        _start_game(chat_id, user_id, kind, consp["text"])
+        return
+    # No conspectus yet — ask the student for a topic to build the game on.
+    if not set_mode(user_id, "game_topic", {"kind": kind}):
+        bot.send_message(
+            chat_id,
+            "Խաղերը հասանելի են միայն հիշողություն միացված ռեժիմում 🙂",
+            parse_mode="HTML",
+        )
+        return
+    bot.send_message(
+        chat_id,
+        "Ո՞ր թեմայով խաղանք։ Գրիր թեման, և ես կպատրաստեմ խաղը 🙂",
+        parse_mode="HTML",
+    )
+
+
+@bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("tfans:"))
+def cb_tf_answer(call):
+    bot.answer_callback_query(call.id)
+    _handle_tf_answer(call.message.chat.id, call.from_user.id, call.data)
+
+
+# ── Daily challenge (Feature 5) ──────────────────────────────────────────────
+def _send_challenge_now(chat_id: int, user_id: int) -> None:
+    """Generate one educational challenge and send it right away."""
+    try:
+        with keep_typing(chat_id):
+            text = generate_challenge(user_id)
+    except Exception as e:
+        print(f"Challenge generation error: {e}")
+        text = ""
+    if not (text and text.strip()):
+        bot.send_message(
+            chat_id,
+            "Չստացվեց պատրաստել մարտահրավերը։ Փորձիր նորից մի փոքր ուշ։",
+            parse_mode="HTML",
+        )
+        return
+    bot.send_message(chat_id, f"🏅 <b>Օրվա մարտահրավեր</b>\n\n{text}", parse_mode="HTML")
+
+
+@bot.message_handler(commands=["challenge"], func=is_allowed)
+def cmd_challenge(message):
+    user_id = message.from_user.id
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) == 1:
+        # No argument: send a challenge right now.
+        _send_challenge_now(message.chat.id, user_id)
+        return
+    arg = parts[1].strip().lower()
+    if arg in ("off", "անջատել"):
+        clear_challenge_time(user_id)
+        bot.send_message(
+            message.chat.id, "🔕 Օրվա մարտահրավերն անջատված է։", parse_mode="HTML"
+        )
+        return
+    hhmm = normalize_time(arg)
+    if not hhmm:
+        bot.send_message(
+            message.chat.id,
+            "Սխալ ձևաչափ։ Գրիր՝ /challenge (հիմա ստանալու համար), "
+            "/challenge 09:00 (ամեն օր ստանալու համար) կամ /challenge off։",
+            parse_mode="HTML",
+        )
+        return
+    if not set_challenge_time(user_id, hhmm):
+        bot.send_message(
+            message.chat.id,
+            "Ամենօրյա մարտահրավերը հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
+            parse_mode="HTML",
+        )
+        return
+    bot.send_message(
+        message.chat.id,
+        f"🏅 Ամեն օր ժամը <b>{html.escape(hhmm)}</b>-ին կուղարկեմ քեզ նոր մարտահրավեր 🙂",
+        parse_mode="HTML",
+    )
+
+
+# ── Ask me anything (Feature 6) ──────────────────────────────────────────────
+def _ask_keyboard():
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("🚪 Ավարտել հարցերը", callback_data="ask:stop"))
+    return kb
+
+
+@bot.message_handler(commands=["ask"], func=is_allowed)
+def cmd_ask(message):
+    if not set_mode(message.from_user.id, "ask"):
+        bot.send_message(
+            message.chat.id,
+            "Հարցերի ռեժիմը հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
+            parse_mode="HTML",
+        )
+        return
+    bot.send_message(
+        message.chat.id,
+        "🤔 <b>Հարցրու ինձ ինչ ուզես</b>\n\n"
+        "Գրիր ցանկացած հարց ցանկացած թեմայով, և ես կպատասխանեմ պարզ ու հասկանալի։ "
+        "Ավարտելու համար սեղմիր կոճակը ներքևում 👇",
+        reply_markup=_ask_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+def _handle_ask(message, text: str) -> None:
+    """Answer a question while the student is in free Q&A mode."""
+    try:
+        with keep_typing(message.chat.id):
+            answer = answer_question(message.from_user.id, text)
+    except Exception as e:
+        print(f"Ask-mode generation error: {e}")
+        answer = ""
+    if not (answer and answer.strip()):
+        bot.send_message(
+            message.chat.id,
+            "Չստացվեց պատասխանել։ Փորձիր նորից մի փոքր ուշ։",
+            parse_mode="HTML",
+        )
+        return
+    # Keep the student in ask-mode (refresh its TTL) and re-show the exit button.
+    set_mode(message.from_user.id, "ask")
+    send_reply(message, answer, reply_markup=_ask_keyboard())
+
+
+@bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("ask:"))
+def cb_ask(call):
+    bot.answer_callback_query(call.id)
+    if call.data == "ask:stop":
+        clear_mode(call.from_user.id)
+        bot.send_message(
+            call.message.chat.id,
+            "✅ Ավարտեցինք հարցերի ռեժիմը։ Ուղարկիր թեմա՝ նոր կոնսպեկտ ստանալու համար 🙂",
+            parse_mode="HTML",
+        )
+
+
+# ── Study plan (Feature 3) ───────────────────────────────────────────────────
+@bot.message_handler(commands=["plan"], func=is_allowed)
+def cmd_plan(message):
+    if not set_mode(message.from_user.id, "plan"):
+        bot.send_message(
+            message.chat.id,
+            "Ուսումնական պլանը հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
+            parse_mode="HTML",
+        )
+        return
+    bot.send_message(
+        message.chat.id,
+        "📅 <b>Ուսումնական պլան</b>\n\n"
+        "Գրիր, թե ի՛նչ առարկաներ կամ թեմաներ պետք է սովորես (կարող ես մեկ "
+        "հաղորդագրության մեջ թվարկել քանիսն ուզում ես), և ես կկազմեմ քեզ համար "
+        "շաբաթական պլան 🙂",
+        parse_mode="HTML",
+    )
+
+
+def _make_study_plan(message, subjects: str) -> None:
+    """Generate and send a weekly study plan from the student's subject list."""
+    try:
+        with keep_typing(message.chat.id):
+            plan = generate_study_plan(message.from_user.id, subjects)
+    except Exception as e:
+        print(f"Study-plan generation error: {e}")
+        plan = ""
+    if not (plan and plan.strip()):
+        bot.send_message(
+            message.chat.id,
+            "Չստացվեց կազմել պլանը։ Փորձիր նորից մի փոքր ուշ։",
+            parse_mode="HTML",
+        )
+        return
+    send_reply(message, f"📅 <b>Քո շաբաթական պլանը</b>\n\n{plan}")
+
+
+def _route_pending_mode(message, text: str, mode: dict) -> bool:
+    """Handle a text message that belongs to an active multi-step flow.
+
+    Returns True if the message was consumed by a flow (so the caller should
+    stop), False to fall through to normal conspectus handling.
+    """
+    name = mode.get("mode")
+    if name == "ask":
+        _handle_ask(message, text)
+        return True
+    if name == "plan":
+        clear_mode(message.from_user.id)
+        _make_study_plan(message, text)
+        return True
+    if name == "game_topic":
+        clear_mode(message.from_user.id)
+        _start_game(message.chat.id, message.from_user.id, mode.get("kind", "tf"), text)
+        return True
+    if name == "game_word":
+        return _handle_word_guess(message, text)
+    return False
+
+
 @bot.message_handler(content_types=["text"], func=is_allowed)
 def handle_message(message):
     if not should_respond(message):
@@ -860,6 +1491,11 @@ def handle_message(message):
         bot.send_message(message.chat.id, limit_msg, parse_mode="HTML")
         _log(message, "out", f"[rate limited] {limit_msg}")
         return
+    # Some flows (/plan, /ask, "guess the word") interpret the next message
+    # specially instead of as a new conspectus request.
+    mode = get_mode(message.from_user.id)
+    if mode and _route_pending_mode(message, text, mode):
+        return
     try:
         with keep_typing(message.chat.id):
             reply = ask_ai(message.from_user.id, text)
@@ -871,7 +1507,11 @@ def handle_message(message):
             incr_topics(message.from_user.id)
             incr_conspectuses(message.from_user.id)
             record_activity(message.from_user.id)
-            send_reply(message, reply, reply_markup=_conspectus_keyboard())
+            send_reply(
+                message,
+                reply,
+                reply_markup=_conspectus_keyboard(message.from_user.id),
+            )
             _award_new_badges(message.chat.id, message.from_user.id)
         else:
             send_reply(message, reply)
@@ -950,7 +1590,9 @@ def handle_voice(message):
             incr_topics(user_id)
             incr_conspectuses(user_id)
             record_activity(user_id)
-            send_reply(message, full_reply, reply_markup=_conspectus_keyboard())
+            send_reply(
+                message, full_reply, reply_markup=_conspectus_keyboard(user_id)
+            )
             _award_new_badges(chat_id, user_id)
         else:
             send_reply(message, full_reply)

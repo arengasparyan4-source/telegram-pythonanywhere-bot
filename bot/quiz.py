@@ -31,11 +31,15 @@ def _key(user_id: int) -> str:
     return f"quiz:{user_id}"
 
 
-def save_quiz(user_id: int, questions: list) -> bool:
-    """Start a fresh quiz from ``questions``. Returns True on success."""
+def save_quiz(user_id: int, questions: list, topic: str = "") -> bool:
+    """Start a fresh quiz from ``questions``. Returns True on success.
+
+    ``topic`` is the conspectus topic the quiz is about; it's stored so wrong
+    answers can be attributed to a weak spot (Feature 9).
+    """
     if store is None:
         return False
-    state = {"questions": questions, "idx": 0, "score": 0}
+    state = {"questions": questions, "idx": 0, "score": 0, "topic": topic}
     try:
         store.set(_key(user_id), json.dumps(state), ex=QUIZ_TTL)
         return True
