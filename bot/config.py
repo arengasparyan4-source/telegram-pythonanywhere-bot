@@ -173,6 +173,22 @@ QUIZ_TTL = 3600  # an in-progress quiz expires after 1 hour (seconds)
 # question/answer cards generated from that conspectus, sent one by one.
 FLASHCARD_NUM = 5  # how many flashcards to generate per session
 
+# Auto summary (Feature 8). After this many processed messages in a study
+# session the bot offers a "📌 Ամփոփում" recap of what was covered. The
+# per-user counter carries a sliding TTL so it resets after a gap of
+# inactivity (a new session starts counting from scratch).
+SUMMARY_EVERY = 18  # offer a recap every N messages
+SUMMARY_SESSION_TTL = 6 * 3600  # session window; counter resets after this idle gap
+
+# Smart inactivity reminder (Feature 9). After a student is inactive this many
+# days, the scheduler sends ONE gentle nudge to review a past topic; a per-user
+# cooldown then suppresses further nudges so an inactive student is never
+# reminded more than once per cooldown window. The scan itself runs once a day
+# at INACTIVITY_CHECK_HHMM (server-local time), driven by bot/scheduler.py.
+INACTIVITY_DAYS = 3  # days of silence before a nudge
+INACTIVITY_COOLDOWN = 3 * 86400  # min gap between nudges to the same user (seconds)
+INACTIVITY_CHECK_HHMM = "10:00"  # daily time the scheduler runs the inactivity scan
+
 # Transient conversation modes (bot/session.py): /plan awaiting subjects,
 # /ask free-Q&A mode, and the "guess the word" game. Expires so a forgotten
 # mode doesn't trap the student in a non-default flow.

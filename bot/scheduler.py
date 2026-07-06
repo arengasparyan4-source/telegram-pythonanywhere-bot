@@ -18,8 +18,11 @@ _scheduler = None
 
 
 def _tick() -> None:
-    """Fire any reminders and daily challenges due this minute. Never raises."""
+    """Fire reminders, daily challenges, and (once a day) inactivity nudges due
+    this minute. Never raises."""
     from bot.challenges import run_due_challenges
+    from bot.config import INACTIVITY_CHECK_HHMM
+    from bot.inactivity import run_inactivity_nudges
     from bot.reminders import run_due_reminders
 
     now = datetime.now()
@@ -32,6 +35,13 @@ def _tick() -> None:
         run_due_challenges(hhmm, today)
     except Exception as e:
         print(f"Challenge tick error: {e}")
+    # Feature 9: scan for inactive students once a day (the per-user cooldown
+    # is the real spam guard; the time gate just keeps the daily scan cheap).
+    if hhmm == INACTIVITY_CHECK_HHMM:
+        try:
+            run_inactivity_nudges(int(now.timestamp()), today)
+        except Exception as e:
+            print(f"Inactivity tick error: {e}")
 
 
 def start_scheduler() -> None:

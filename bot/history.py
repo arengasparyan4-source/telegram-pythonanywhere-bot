@@ -196,6 +196,27 @@ def touch_user(user_id: int, now: int | None = None) -> None:
         print(f"Store write error (touch_user): {e}")
 
 
+def get_all_user_ids() -> list:
+    """Return every user_id string ever seen (for scheduler-driven scans)."""
+    return _load_users_index()
+
+
+def get_last_seen(user_id: int) -> int | None:
+    """Return the user's last-active epoch seconds, or None if unknown.
+
+    Reads the seen:{uid} marker written by touch_user on every interaction.
+    Used by the Feature 9 inactivity scan. Safe/None when the store is off.
+    """
+    if store is None:
+        return None
+    try:
+        value = store.get(f"seen:{user_id}")
+        return int(value) if value else None
+    except Exception as e:
+        print(f"Store read error (last seen): {e}")
+        return None
+
+
 def incr_messages() -> None:
     """Count one processed message toward the bot-wide total."""
     if store is None:

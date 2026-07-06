@@ -642,6 +642,68 @@ def generate_quiz_hint(user_id: int, question: str, options: list) -> str:
     return sanitize_reply(generate(user_id, messages))
 
 
+def suggest_video_search(user_id: int, topic: str) -> str:
+    """Suggest a short, child-friendly YouTube search query for a topic (Feature 10).
+
+    Returns a few search terms (a single line, no quotes/URL) in the topic's
+    language — the handler turns them into a YouTube search link. One-shot call
+    (no history). Falls back to the topic itself if generation fails or returns
+    nothing, so the caller always has something to search for.
+    """
+    instruction = (
+        "Suggest a short YouTube SEARCH QUERY (3-6 words) a child could use to "
+        f"find a good, age-appropriate educational video about «{topic}». Return "
+        "ONLY the search words on a single line — no quotes, no URL, no "
+        "explanation. Reply in the SAME language as the topic (Armenian by default)."
+    )
+    messages = [
+        {"role": "system", "content": _build_system_prompt(user_id)},
+        {"role": "user", "content": instruction},
+    ]
+    query = sanitize_reply(generate(user_id, messages)).strip()
+    if query:
+        # Keep only the first line and strip any wrapping quotes the model adds.
+        query = query.splitlines()[0].strip().strip('"').strip("«»").strip()
+    return query or topic
+
+
+def generate_summary(user_id: int) -> str:
+    """Recap what the student studied this session, from recent history (Feature 8).
+
+    Reads the user's conversation history and produces a short, warm bullet
+    recap of the topics covered and the key things to remember. One-shot call
+    that does NOT append to history (so it never pollutes future context).
+    Returns "" when there's nothing to recap (empty history).
+    """
+    history = get_history(user_id)
+    if not history:
+        return ""
+    # Compact transcript of the recent turns for the model to summarize.
+    transcript = "\n".join(
+        f"{'Աշակերտ' if m.get('role') == 'user' else 'Ուսուցիչ'}: {m.get('content', '')}"
+        for m in history
+        if m.get("role") in ("user", "assistant") and m.get("content")
+    )
+    if not transcript.strip():
+        return ""
+    instruction = (
+        "Below is the recent conversation between a student and their tutor. "
+        "Write a SHORT, warm recap (ամփոփում) of what the student studied in "
+        "this session: the main topics covered and the key things to remember, "
+        "as a few short bullet lines (each starting with • ). Keep it brief and "
+        "encouraging — this is a study recap, not a new lesson. Reply in the "
+        "SAME language the student was using (Armenian by default)."
+        + _grade_clause(user_id)
+        + " Output ONLY the recap.\n\n"
+        f"Conversation:\n{transcript}"
+    )
+    messages = [
+        {"role": "system", "content": _build_system_prompt(user_id)},
+        {"role": "user", "content": instruction},
+    ]
+    return sanitize_reply(generate(user_id, messages))
+
+
 def define_word(user_id: int, word: str) -> str:
     """Explain a difficult word in simple language with an example (Feature 3).
 
@@ -655,6 +717,30 @@ def define_word(user_id: int, word: str) -> str:
         "word itself in <b>bold</b>. Reply in the SAME language as the word "
         "(Armenian by default)." + _grade_clause(user_id) + " "
         "Output ONLY the explanation and the example."
+    )
+    messages = [
+        {"role": "system", "content": _build_system_prompt(user_id)},
+        {"role": "user", "content": instruction},
+    ]
+    return sanitize_reply(generate(user_id, messages))
+
+
+def pronounce_term(user_id: int, term: str) -> str:
+    """Explain phonetically how to pronounce a difficult term (Feature 11).
+
+    Writes the pronunciation out in ARMENIAN letters: a syllable-by-syllable
+    breakdown with the stressed syllable marked, plus one short tip for any
+    tricky sound. One-shot call (no history). Armenian by default (mirrors the
+    term's language).
+    """
+    instruction = (
+        f"A child wants to know how to pronounce the term «{term}». Explain its "
+        "pronunciation PHONETICALLY, writing the sounds out in ARMENIAN letters "
+        "(հայերեն տառերով). Break it into syllables separated by hyphens and "
+        "mark the STRESSED syllable (put it in <b>bold</b>). Add one short, "
+        "friendly tip if a sound is tricky. Keep it brief. Reply in Armenian by "
+        "default (or the term's language)." + _grade_clause(user_id) + " "
+        "Output ONLY the pronunciation guide."
     )
     messages = [
         {"role": "system", "content": _build_system_prompt(user_id)},

@@ -4,6 +4,7 @@ import io
 import os
 import time
 from datetime import datetime
+from urllib.parse import quote_plus
 from telebot import types
 from bot.clients import bot, BOT_INFO, store
 from bot.config import (
@@ -30,9 +31,12 @@ from bot.ai import (
     generate_quiz_hint,
     generate_story,
     generate_study_plan,
+    generate_summary,
     generate_truefalse,
     generate_why_matters,
     generate_word_game,
+    pronounce_term,
+    suggest_video_search,
 )
 from bot.achievements import check_and_award, get_badges
 from bot.activity import record_activity
@@ -42,6 +46,7 @@ from bot.challenges import (
     set_challenge_time,
 )
 from bot.conspectus import get_last_conspectus, save_last_conspectus
+from bot.drawings import record_drawing
 from bot.games import clear_game, get_game, save_game, update_game
 from bot.grade import clear_grade, get_grade, set_grade
 from bot.helpers import is_allowed, keep_typing, send_reply, should_respond
@@ -92,6 +97,7 @@ from bot.stats import (
     incr_quizzes,
     incr_topics,
 )
+from bot.summary import note_message
 from bot.voice import transcribe, whisper_enabled
 
 # Verbose console logging for local dev and teaching. Enabled by
@@ -443,6 +449,7 @@ def _conspectus_keyboard(user_id: int):
     kb.add(types.InlineKeyboardButton(t(user_id, "btn_mindmap"), callback_data="mindmap:show"))
     kb.add(types.InlineKeyboardButton(t(user_id, "btn_story"), callback_data="story:show"))
     kb.add(types.InlineKeyboardButton(t(user_id, "btn_why"), callback_data="why:show"))
+    kb.add(types.InlineKeyboardButton(t(user_id, "btn_video"), callback_data="video:show"))
     kb.add(
         types.InlineKeyboardButton(t(user_id, "btn_homework"), callback_data="homework:show")
     )
@@ -754,6 +761,61 @@ def cb_weakspots(call):
         return
     topics = list_weakspots(call.from_user.id)
     if 0 <= idx < len(topics):
+        _regenerate_from_topic(
+            call.message.chat.id, call.from_user.id, topics[idx], call.message
+        )
+
+
+# ── Spaced repetition (Feature 7) ────────────────────────────────────────────
+# /review lists the topics whose spaced-repetition review is due now (schedule
+# in bot/history.py: due after 1 → 3 → 7 days, advancing a stage per review).
+# record_study() is called from handle_message / handle_voice whenever a fresh
+# conspectus is generated, so every studied topic enters the schedule. Tapping
+# a due topic marks it reviewed (advancing its stage) and re-shows its
+# conspectus so the student can revise on the spot.
+@bot.message_handler(commands=["review"], func=is_allowed)
+def cmd_review(message):
+    topics = get_due_reviews(message.from_user.id)
+    if not topics:
+        bot.send_message(
+            message.chat.id,
+            "🧠 Հիմա կրկնելու թեմա չկա 👍 Ուղարկիր դասագրքի անունը կամ թեման, "
+            "և մի քանի օրից ես կհիշեցնեմ, որ ժամանակն է կրկնել այն։",
+            parse_mode="HTML",
+        )
+        return
+    kb = types.InlineKeyboardMarkup()
+    for i, topic in enumerate(topics):
+        kb.add(
+            types.InlineKeyboardButton(
+                f"🧠 {topic[:50]}", callback_data=f"review:show:{i}"
+            )
+        )
+    bot.send_message(
+        message.chat.id,
+        "🧠 <b>Կրկնության ժամանակն է</b>\nԱյս թեմաներն արժե հիմա կրկնել՝ որ լավ "
+        "հիշվեն։ Սեղմիր որևէ մեկը՝ նորից անցնելու համար 👇",
+        reply_markup=kb,
+        parse_mode="HTML",
+    )
+
+
+@bot.callback_query_handler(
+    func=lambda c: bool(c.data) and c.data.startswith("review:")
+)
+def cb_review(call):
+    bot.answer_callback_query(call.id)
+    if not call.data.startswith("review:show:"):
+        return
+    try:
+        idx = int(call.data[len("review:show:") :])
+    except ValueError:
+        return
+    topics = get_due_reviews(call.from_user.id)
+    if 0 <= idx < len(topics):
+        # Advance the spaced-repetition stage first (so a re-shown topic isn't
+        # immediately due again), then re-show its conspectus for revision.
+        mark_reviewed(call.from_user.id, topics[idx])
         _regenerate_from_topic(
             call.message.chat.id, call.from_user.id, topics[idx], call.message
         )
@@ -1569,6 +1631,44 @@ def cb_why_matters(call):
     _send_why_matters(call.message.chat.id, call.from_user.id, call.message)
 
 
+# ── Video suggestion (Feature 10) ────────────────────────────────────────────
+# The "🎥 Վիդեո" button under a conspectus suggests an educational YouTube
+# search for the topic. We do NOT scrape or call the YouTube API — we ask the
+# model for good child-friendly search terms and build a plain search URL the
+# student can tap. Falls back to the raw topic if the model doesn't answer.
+def _send_video_suggestion(chat_id: int, user_id: int, message) -> None:
+    consp = get_last_conspectus(user_id)
+    if not consp:
+        bot.send_message(
+            chat_id,
+            "Նախ ուղարկիր դասագրքի անունը կամ թեման, որ պատրաստեմ կոնսպեկտ, "
+            "հետո կառաջարկեմ վիդեո 🎥",
+            parse_mode="HTML",
+        )
+        return
+    try:
+        with keep_typing(chat_id):
+            query = suggest_video_search(user_id, consp["topic"])
+    except Exception as e:
+        print(f"Video suggestion error: {e}")
+        query = consp["topic"]
+    url = "https://www.youtube.com/results?search_query=" + quote_plus(query)
+    send_reply(
+        message,
+        f"🎥 <b>Վիդեո՝ {html.escape(consp['topic'])}</b>\n\n"
+        f"Որոնիր YouTube-ում՝ <b>{html.escape(query)}</b>\n\n"
+        f'<a href="{html.escape(url)}">▶️ Բացիր որոնումը YouTube-ում</a>',
+    )
+
+
+@bot.callback_query_handler(
+    func=lambda c: bool(c.data) and c.data.startswith("video:")
+)
+def cb_video(call):
+    bot.answer_callback_query(call.id)
+    _send_video_suggestion(call.message.chat.id, call.from_user.id, call.message)
+
+
 # ── Homework exercises (Feature 1) ───────────────────────────────────────────
 def _send_homework(chat_id: int, user_id: int, message) -> None:
     """Generate practical exercises from the last conspectus and send them."""
@@ -1960,6 +2060,59 @@ def cb_ask(call):
         )
 
 
+# ── Auto summary (Feature 8) ─────────────────────────────────────────────────
+# After a long study session the bot offers a "📌 Ամփոփում" recap (the offer is
+# posted from handle_message every SUMMARY_EVERY messages, tracked in
+# bot/summary.py). Tapping the button — or running /summary anytime — recaps
+# the recent conversation via ask_ai/generate_summary.
+def _summary_offer_keyboard():
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("📌 Ամփոփում", callback_data="summary:make"))
+    return kb
+
+
+def _offer_summary(chat_id: int) -> None:
+    """Post the optional 'want a recap?' prompt with the summary button."""
+    bot.send_message(
+        chat_id,
+        "📌 Մենք արդեն շատ բան անցանք 🙂 Ուզո՞ւմ ես այս սեսիայի կարճ ամփոփումը։",
+        reply_markup=_summary_offer_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+def _send_summary(chat_id: int, user_id: int, message) -> None:
+    """Generate and send a recap of the student's recent study session."""
+    try:
+        with keep_typing(chat_id):
+            summary = generate_summary(user_id)
+    except Exception as e:
+        print(f"Summary generation error: {e}")
+        summary = ""
+    if not (summary and summary.strip()):
+        bot.send_message(
+            chat_id,
+            "Դեռ ամփոփելու բան չկա 🙂 Ուղարկիր թեմա, և մի քիչ սովորելուց հետո "
+            "կպատրաստեմ ամփոփում։",
+            parse_mode="HTML",
+        )
+        return
+    send_reply(message, f"📌 <b>Այս սեսիայի ամփոփումը</b>\n\n{summary}")
+
+
+@bot.message_handler(commands=["summary"], func=is_allowed)
+def cmd_summary(message):
+    _send_summary(message.chat.id, message.from_user.id, message)
+
+
+@bot.callback_query_handler(
+    func=lambda c: bool(c.data) and c.data.startswith("summary:")
+)
+def cb_summary(call):
+    bot.answer_callback_query(call.id)
+    _send_summary(call.message.chat.id, call.from_user.id, call.message)
+
+
 # ── Exam prep (Feature 1 / smart-learning) ───────────────────────────────────
 @bot.message_handler(commands=["exam"], func=is_allowed)
 def cmd_exam(message):
@@ -2013,7 +2166,8 @@ def _define_word(message, word: str) -> None:
             parse_mode="HTML",
         )
         return
-    send_reply(message, f"📖 {explanation}")
+    # Feature 11: offer a pronunciation guide for the looked-up word.
+    send_reply(message, f"📖 {explanation}", reply_markup=_pron_keyboard(word))
 
 
 @bot.message_handler(commands=["word"], func=is_allowed)
@@ -2036,6 +2190,77 @@ def cmd_word(message):
         "օրինակով 🙂",
         parse_mode="HTML",
     )
+
+
+# ── Pronunciation (Feature 11) ───────────────────────────────────────────────
+# A "🗣 Արտասանություն" option that spells out phonetically how to say a hard
+# term, written in Armenian letters. Reachable two ways: the button attached to
+# every /word definition (the word rides along in callback_data), and the
+# /pronounce command (inline «/pronounce <term>» or a prompt + one-shot mode).
+def _pron_keyboard(word: str):
+    """Inline keyboard with a pronounce button for ``word``.
+
+    The word travels in callback_data; Telegram caps that at 64 bytes, so for
+    an unusually long term we simply omit the button (None) rather than send an
+    invalid keyboard — /pronounce still handles arbitrary-length terms.
+    """
+    data = f"pron:{word}"
+    if len(data.encode("utf-8")) > 64:
+        return None
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("🗣 Արտասանություն", callback_data=data))
+    return kb
+
+
+def _pronounce(chat_id: int, user_id: int, term: str, message) -> None:
+    """Generate and send a phonetic pronunciation guide for ``term``."""
+    try:
+        with keep_typing(chat_id):
+            guide = pronounce_term(user_id, term)
+    except Exception as e:
+        print(f"Pronunciation error: {e}")
+        guide = ""
+    if not (guide and guide.strip()):
+        bot.send_message(
+            chat_id,
+            "Չստացվեց արտասանությունը։ Փորձիր նորից մի փոքր ուշ։",
+            parse_mode="HTML",
+        )
+        return
+    send_reply(message, f"🗣 <b>{html.escape(term)}</b>\n\n{guide}")
+
+
+@bot.message_handler(commands=["pronounce"], func=is_allowed)
+def cmd_pronounce(message):
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) > 1 and parts[1].strip():
+        # Inline form: /pronounce <term> — pronounce it right away.
+        _pronounce(message.chat.id, message.from_user.id, parts[1].strip(), message)
+        return
+    if not set_mode(message.from_user.id, "pronounce_lookup"):
+        bot.send_message(
+            message.chat.id,
+            "Արտասանության օգնականը հասանելի է միայն հիշողություն միացված ռեժիմում 🙂",
+            parse_mode="HTML",
+        )
+        return
+    bot.send_message(
+        message.chat.id,
+        "🗣 <b>Արտասանություն</b>\n\nԳրիր դժվար բառը կամ տերմինը, և ես ցույց "
+        "կտամ, թե ինչպես այն արտասանել 🙂",
+        parse_mode="HTML",
+    )
+
+
+@bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("pron:"))
+def cb_pronounce(call):
+    bot.answer_callback_query(call.id)
+    # Everything after the prefix is the word — do NOT split on ':' (a term may
+    # contain one). The tapping user is call.from_user, not the bot that owns
+    # call.message, so read the user id from the callback.
+    term = call.data[len("pron:") :].strip()
+    if term:
+        _pronounce(call.message.chat.id, call.from_user.id, term, call.message)
 
 
 # ── Study plan (Feature 3) ───────────────────────────────────────────────────
@@ -2097,6 +2322,10 @@ def _route_pending_mode(message, text: str, mode: dict) -> bool:
         clear_mode(message.from_user.id)
         _define_word(message, text)
         return True
+    if name == "pronounce_lookup":
+        clear_mode(message.from_user.id)
+        _pronounce(message.chat.id, message.from_user.id, text, message)
+        return True
     if name == "plan":
         clear_mode(message.from_user.id)
         _make_study_plan(message, text)
@@ -2140,6 +2369,9 @@ def handle_message(message):
     mode = get_mode(message.from_user.id)
     if mode and _route_pending_mode(message, text, mode):
         return
+    # Feature 8: count this study message; True every SUMMARY_EVERY-th one, when
+    # we then offer a recap after the reply.
+    offer_summary = note_message(message.from_user.id)
     try:
         with keep_typing(message.chat.id):
             reply = ask_ai(message.from_user.id, text)
@@ -2151,12 +2383,17 @@ def handle_message(message):
             incr_topics(message.from_user.id)
             incr_conspectuses(message.from_user.id)
             record_activity(message.from_user.id)
+            # Feature 7: enter this topic into the spaced-repetition schedule.
+            record_study(message.from_user.id, text)
             send_reply(
                 message,
                 reply,
                 reply_markup=_conspectus_keyboard(message.from_user.id),
             )
             _award_new_badges(message.chat.id, message.from_user.id)
+            # Feature 8: after a long session, offer a recap of what was studied.
+            if offer_summary:
+                _offer_summary(message.chat.id)
         else:
             send_reply(message, reply)
         _log(message, "out", reply)
@@ -2168,6 +2405,33 @@ def handle_message(message):
             parse_mode="HTML",
         )
         _log(message, "out", f"[error] {e}")
+
+
+# ── Draw the topic (Feature 12) ──────────────────────────────────────────────
+# The child can send a drawing (photo) of what they studied. The bot doesn't
+# analyze the image (no vision required) — it just responds warmly and records
+# that the student took part (bot/drawings.py). In group chats it stays quiet
+# unless directly addressed, so it doesn't react to every photo (mirrors the
+# group-mode spam guard in Feature 4).
+@bot.message_handler(content_types=["photo"], func=is_allowed)
+def handle_photo(message):
+    if _is_group(message) and not (
+        _is_reply_to_bot(message) or _mentions_bot(message)
+    ):
+        return
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    _log(message, "in", "[photo]")
+    touch_user(user_id)
+    count = record_drawing(user_id)
+    text = (
+        "🎨 Վա՜յ, ի՜նչ հիանալի նկար 👏 Շատ ապրե՛ս, որ նկարում ես սովորածդ․ "
+        "այդպես թեմաներն ավելի լավ են հիշվում 🌟"
+    )
+    if count > 1:
+        text += f"\n\nԴու արդեն կիսվել ես <b>{count}</b> նկարով 🎉"
+    bot.send_message(chat_id, text, parse_mode="HTML")
+    _log(message, "out", text)
 
 
 # ── Voice messages ──────────────────────────────────────────────────────────
@@ -2237,6 +2501,8 @@ def handle_voice(message):
             incr_topics(user_id)
             incr_conspectuses(user_id)
             record_activity(user_id)
+            # Feature 7: enter this topic into the spaced-repetition schedule.
+            record_study(user_id, transcript)
             send_reply(
                 message, full_reply, reply_markup=_conspectus_keyboard(user_id)
             )
