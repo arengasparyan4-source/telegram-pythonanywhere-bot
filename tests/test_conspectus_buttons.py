@@ -125,3 +125,49 @@ def test_cb_conspectus_routes_more_and_new():
         cb_conspectus(_call("consp:new"))
         mock_new.assert_called_once_with(456)
         assert mock_bot.answer_callback_query.call_count == 2
+
+
+# ── handlers: conspectus "🗣 Pronunciation" button ──────────────────────────
+
+
+def test_conspectus_keyboard_has_pronounce_button():
+    with patch("bot.handlers.types") as mock_types:
+        from bot.handlers import _conspectus_keyboard
+
+        _conspectus_keyboard(123)
+        datas = [
+            kw.get("callback_data")
+            for _a, kw in mock_types.InlineKeyboardButton.call_args_list
+        ]
+        assert "cpron:topic" in datas
+
+
+def test_cb_conspectus_pronounce_pronounces_topic():
+    call = _call("cpron:topic")
+    with (
+        patch(
+            "bot.handlers.get_last_conspectus",
+            return_value={"topic": "Ֆոտոսինթեզ", "text": "notes"},
+        ),
+        patch("bot.handlers._pronounce") as mock_pron,
+        patch("bot.handlers.bot"),
+    ):
+        from bot.handlers import cb_conspectus_pronounce
+
+        cb_conspectus_pronounce(call)
+        # Pronounces the stored topic for the tapping user.
+        mock_pron.assert_called_once_with(456, 123, "Ֆոտոսինթեզ", call.message)
+
+
+def test_cb_conspectus_pronounce_without_conspectus_prompts():
+    call = _call("cpron:topic")
+    with (
+        patch("bot.handlers.get_last_conspectus", return_value=None),
+        patch("bot.handlers._pronounce") as mock_pron,
+        patch("bot.handlers.bot") as mock_bot,
+    ):
+        from bot.handlers import cb_conspectus_pronounce
+
+        cb_conspectus_pronounce(call)
+        mock_pron.assert_not_called()
+        assert "թեմա" in mock_bot.send_message.call_args[0][1]

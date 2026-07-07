@@ -454,6 +454,11 @@ def _conspectus_keyboard(user_id: int):
         types.InlineKeyboardButton(t(user_id, "btn_homework"), callback_data="homework:show")
     )
     kb.add(types.InlineKeyboardButton(t(user_id, "btn_simple"), callback_data="simple:show"))
+    kb.add(
+        types.InlineKeyboardButton(
+            t(user_id, "btn_pronounce"), callback_data="cpron:topic"
+        )
+    )
     kb.add(types.InlineKeyboardButton(t(user_id, "btn_save"), callback_data="fav:save"))
     kb.row(
         types.InlineKeyboardButton(t(user_id, "btn_more"), callback_data="consp:more"),
@@ -2261,6 +2266,25 @@ def cb_pronounce(call):
     term = call.data[len("pron:") :].strip()
     if term:
         _pronounce(call.message.chat.id, call.from_user.id, term, call.message)
+
+
+# The 🗣 button under a conspectus pronounces the topic itself. The topic is
+# read from the stored conspectus (not carried in callback_data) so an
+# arbitrarily long topic can't blow Telegram's 64-byte callback_data cap.
+@bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("cpron:"))
+def cb_conspectus_pronounce(call):
+    bot.answer_callback_query(call.id)
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    consp = get_last_conspectus(user_id)
+    if not consp or not consp.get("topic"):
+        bot.send_message(
+            chat_id,
+            "Դեռ արտասանելու թեմա չկա 🙂 Ուղարկիր դասագրքի անունը կամ թեման։",
+            parse_mode="HTML",
+        )
+        return
+    _pronounce(chat_id, user_id, consp["topic"], call.message)
 
 
 # ── Study plan (Feature 3) ───────────────────────────────────────────────────
