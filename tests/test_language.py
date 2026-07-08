@@ -115,10 +115,8 @@ def test_cb_language_warns_without_store():
         assert "հիշողություն" in mock_bot.send_message.call_args[0][1]
 
 
-def test_cmd_help_uses_localized_lines():
+def test_cmd_help_groups_commands():
     with (
-        patch("bot.handlers.help_lines", return_value=["/start — go"]),
-        patch("bot.handlers.t", side_effect=lambda uid, key, **kw: f"[{key}]"),
         patch("bot.handlers.HF_SPACE_ID", ""),
         patch("bot.handlers.bot") as mock_bot,
     ):
@@ -126,4 +124,30 @@ def test_cmd_help_uses_localized_lines():
 
         cmd_help(make_message(text="/help"))
         sent = mock_bot.send_message.call_args[0][1]
-        assert "[help_title]" in sent and "/start — go" in sent
+        # Bold group headers are present.
+        assert "<b>Հիմնական</b>" in sent
+        assert "<b>Ուսուցում</b>" in sent
+        assert "<b>Խմբային</b>" in sent
+        # Commands land under the menu, /admin stays hidden.
+        assert "/start —" in sent and "/quiz —" in sent
+        assert "/admin" not in sent
+        # HTML parse mode so the tags render.
+        assert mock_bot.send_message.call_args[1]["parse_mode"] == "HTML"
+
+
+def test_cmd_help_shows_model_only_with_hf():
+    from bot.handlers import cmd_help
+
+    with (
+        patch("bot.handlers.HF_SPACE_ID", ""),
+        patch("bot.handlers.bot") as mock_bot,
+    ):
+        cmd_help(make_message(text="/help"))
+        assert "/model" not in mock_bot.send_message.call_args[0][1]
+
+    with (
+        patch("bot.handlers.HF_SPACE_ID", "some/space"),
+        patch("bot.handlers.bot") as mock_bot,
+    ):
+        cmd_help(make_message(text="/help"))
+        assert "/model" in mock_bot.send_message.call_args[0][1]

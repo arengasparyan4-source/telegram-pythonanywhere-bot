@@ -75,7 +75,7 @@ from bot.history import (
     start_admin_session,
     touch_user,
 )
-from bot.i18n import help_lines, t
+from bot.i18n import t
 from bot.jokes import jokes_disabled, set_jokes_disabled
 from bot.parent import build_report, link_child
 from bot.pdf import build_conspectus_pdf
@@ -153,13 +153,90 @@ def cmd_start(message):
 
 @bot.message_handler(commands=["help"], func=is_allowed)
 def cmd_help(message):
-    user_id = message.from_user.id
-    lines = list(help_lines(user_id))
+    # Grouped, HTML-formatted command menu. Commands are organized into
+    # labeled sections with bold headers and an emoji per group so the list
+    # stays readable as the bot grows. /admin is deliberately omitted (it's an
+    # operator tool). /model only exists when an HF space is configured, so it's
+    # appended to the last group conditionally.
+    groups = [
+        (
+            "📚 <b>Հիմնական</b>",
+            [
+                "/start — սկսել զրույցը բոտի հետ",
+                "/help — տեսնել այս ցանկը",
+                "/reset — մաքրել զրույցի պատմությունը",
+                "/about — բոտի մասին",
+            ],
+        ),
+        (
+            "🎓 <b>Ուսուցում</b>",
+            [
+                "/grade — ընտրել դասարան",
+                "/plan — ուսումնական պլան",
+                "/exam — քննության նախապատրաստում",
+                "/word — բառի բացատրություն",
+                "/pronounce — ինչպես արտասանել դժվար բառը",
+                "/review — կրկնության թեմաներ",
+                "/ask — ազատ հարց-պատասխան",
+            ],
+        ),
+        (
+            "🎮 <b>Խաղեր և թեստեր</b>",
+            [
+                "/quiz — թեստ անցնել",
+                "/game — կրթական խաղեր",
+                "/challenge — օրվա մարտահրավեր",
+            ],
+        ),
+        (
+            "⭐ <b>Անհատական</b>",
+            [
+                "/language — ինտերֆեյսի լեզու",
+                "/favorites — սիրելի թեմաներ",
+                "/weakspots — թույլ կողմեր",
+                "/stats — իմ վիճակագրությունը",
+                "/achievements — իմ վաստակած նշանները",
+            ],
+        ),
+        (
+            "👥 <b>Խմբային</b>",
+            [
+                "/askclass — հարց դասարանին",
+                "/answers — տեսնել դասարանի պատասխանները",
+                "/leaderboard — վարկանիշային աղյուսակ",
+                "/duel — մրցույթ մեկ ուրիշի հետ",
+                "/join — միանալ մրցույթին",
+                "/endduel — ավարտել մրցույթը",
+            ],
+        ),
+        (
+            "🔧 <b>Այլ</b>",
+            [
+                "/joke — կատակ",
+                "/stopjoke — անջատել կատակները",
+                "/repeat — կրկնել վերջին թեման",
+                "/summary — այս սեսիայի կարճ ամփոփում",
+                "/pdf — վերջին կոնսպեկտը PDF ֆայլով",
+                "/remind — ամենօրյա հիշեցում",
+                "/parent — ծնողի շաբաթական հաշվետվություն",
+                "/sha — բոտի ընթացիկ տարբերակը",
+            ],
+        ),
+    ]
     if HF_SPACE_ID:
-        lines.append(t(user_id, "help_model"))
+        groups[-1][1].append("/model — փոխել AI մատակարարը")
+
+    intro = "👋 <b>Ահա թե ինչ կարող եմ անել քեզ համար։</b>"
+    outro = (
+        "💡 Պարզապես գրիր դասագրքի անունը կամ որևէ թեմա, "
+        "և ես կպատրաստեմ քեզ համար պատրաստի կոնսպեկտ 🙂"
+    )
+    sections = [intro]
+    sections += [header + "\n" + "\n".join(cmds) for header, cmds in groups]
+    sections.append(outro)
     bot.send_message(
         message.chat.id,
-        t(user_id, "help_title") + "\n" + "\n".join(lines),
+        "\n\n".join(sections),
         parse_mode="HTML",
     )
 
